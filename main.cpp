@@ -53,8 +53,11 @@ private:
 
     SwapchainKHR swapChain = nullptr;
     vector<vk::Image> swapChainImages;
-    vk::Format swapChainImageFormat = vk::Format::eUndefined;
+    vk::SurfaceFormatKHR swapSurfaceFormat;
     vk::Extent2D swapChainExtent;
+
+    // We own so raii?
+    vector<vk::raii::ImageView> swapChainImageViews;
 
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
@@ -312,11 +315,11 @@ private:
         vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR(surface);
         auto surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
 
-        auto swapSurfaceFormat = ChooseSwapSurfaceFormat(availableFormats);
+        swapSurfaceFormat = ChooseSwapSurfaceFormat(availableFormats);
         auto presentMode = ChooseSwapPresentMode(availablePresentModes);
         vk::Extent2D extent = ChooseSwapExtent(surfaceCapabilities);
 
-        swapChainImageFormat = swapSurfaceFormat.format;
+        auto swapChainImageFormat = swapSurfaceFormat.format;
 
         uint32_t imageCount = surfaceCapabilities.minImageCount + 1; // How many imgs in swapchain you need to function plus one to avoid waiting
         if (surfaceCapabilities.maxImageCount > 0 && imageCount > surfaceCapabilities.maxImageCount) {
@@ -366,6 +369,34 @@ private:
         surface = vk::raii::SurfaceKHR(instance, rawSurface); // Nice auto cleanup version
     }
 
+    void CreateImageViews() {
+        swapChainImageViews.clear();
+
+        vk::ImageViewCreateInfo imageViewCreateInfo{
+            .viewType = vk::ImageViewType::e2D,
+            .format = swapSurfaceFormat.format,
+            .subresourceRange = {
+                vk::ImageAspectFlagBits::eColor,
+                0, // BaseMip
+                1, // LevelCount
+                0, // baseArrayLayer
+                1  // LayerCount (for stereographic)
+            },
+        };
+
+        for (auto image : swapChainImages) {
+            imageViewCreateInfo.image = image;
+            // vk::raii::ImageView imgView = vk::raii::ImageView(device, imageViewCreateInfo); then pushing back Doesn't work without moving ig
+            swapChainImageViews.emplace_back(device, imageViewCreateInfo); // constructs ImageView then pushes
+        }
+
+    }
+
+    void CreateGraphicsPipeline() {
+        // Do programmable stages; Vertex, Fragment
+        // Then fixed-function parameter setup for blending mode, viewport, rasterization
+    }
+
     void InitVulkan() {
         CreateInstance();
         SetupDebugMessenger();
@@ -374,6 +405,9 @@ private:
         CreateLogicalDevice();
 
         CreateSwapchain();
+        CreateImageViews();
+
+        CreateGraphicsPipeline();
     }
 
     void MainLoop() {
