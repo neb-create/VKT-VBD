@@ -1,4 +1,3 @@
-
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 #	include <vulkan/vulkan_raii.hpp>
@@ -79,6 +78,8 @@ private:
     // We own so raii?
     vector<vk::raii::ImageView> swapChainImageViews;
 
+    vk::raii::PipelineLayout pipelineLayout = nullptr;
+
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
     const bool enableValidationLayers = false;
@@ -137,7 +138,7 @@ private:
             // Copy from begin to end
             requiredLayers.assign(desiredValidationLayers.begin(), desiredValidationLayers.end());
         }
-        
+
         // Check if required validation layers are supported
         auto layerProperties = context.enumerateInstanceLayerProperties();
         for (const auto& requiredLayer : requiredLayers) {
@@ -168,7 +169,7 @@ private:
         for (const auto& extension : supportedExtensions) {
             cout << "\t" << extension.extensionName << endl;
         }
-        
+
         vk::InstanceCreateInfo createInfo{
             .pApplicationInfo = &appInfo,
             .enabledLayerCount = static_cast<uint32_t>(requiredLayers.size()),
@@ -176,7 +177,7 @@ private:
             .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
             .ppEnabledExtensionNames = extensions.data()
         };
-		
+
         try {
             instance = vk::raii::Instance(context, createInfo);
         }
@@ -193,13 +194,13 @@ private:
     static bool IsDeviceSuitable(const vk::raii::PhysicalDevice& physicalDevice) {
         auto deviceProperties = physicalDevice.getProperties();
         auto deviceFeatures = physicalDevice.getFeatures(); // What optional features?
-        
+
         // Must support API Version >= 1.3
         bool isSuitable = physicalDevice.getProperties().apiVersion >= VK_API_VERSION_1_3;
 
         // It must have a queue family that supports graphics calls
         auto queueFamilies = physicalDevice.getQueueFamilyProperties();
-        
+
         bool foundGraphicsFamily = false;
         for (const auto& queueFamily : queueFamilies) {
             if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics) {
@@ -218,7 +219,7 @@ private:
             });
         assert(graphicsIter != queueFamilies.end());
         *pGraphicsIndex = static_cast<uint32_t>(std::distance(queueFamilies.begin(), graphicsIter));
-        *pPresentIndex = physicalDevice.getSurfaceSupportKHR(*pGraphicsIndex, *surface) 
+        *pPresentIndex = physicalDevice.getSurfaceSupportKHR(*pGraphicsIndex, *surface)
             ? *pGraphicsIndex : U32T(queueFamilies.size());
 
         if (*pPresentIndex == queueFamilies.size()) {
@@ -257,12 +258,12 @@ private:
         // uint32_t graphicsIndex, presentIndex; // Very likely same qFamily
         FindQueueFamilyIndices(physicalDevice, &graphicsIndex, &presentIndex);
         float queuePriority = 0.5f; // [0,1] mandatory even if 1 queue
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo{ 
+        vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
             .queueFamilyIndex = graphicsIndex, // Index within physical device
-            .queueCount = 1, 
+            .queueCount = 1,
             .pQueuePriorities = &queuePriority }; // For creating the graphics queue
         // We can only have a few queues per queue family, and we only really need one per family.  We can create cmd buffers on multiple threads and submit all of them on main thread with low overhead
-        
+
         // Modern simplification to auto chain structs with pNext
         vk::StructureChain<
             vk::PhysicalDeviceFeatures2, // A
@@ -337,7 +338,7 @@ private:
 
         swapSurfaceFormat = ChooseSwapSurfaceFormat(availableFormats);
         auto presentMode = ChooseSwapPresentMode(availablePresentModes);
-        vk::Extent2D extent = ChooseSwapExtent(surfaceCapabilities);
+        swapChainExtent = ChooseSwapExtent(surfaceCapabilities);
 
         auto swapChainImageFormat = swapSurfaceFormat.format;
 
@@ -353,7 +354,7 @@ private:
             .minImageCount = imageCount,
             .imageFormat = swapSurfaceFormat.format,
             .imageColorSpace = swapSurfaceFormat.colorSpace,
-            .imageExtent = extent,
+            .imageExtent = swapChainExtent,
             .imageArrayLayers = 1, // # layers in each image (for stereoscopic 3D apps)
             .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
             .imageSharingMode = vk::SharingMode::eExclusive,
@@ -427,6 +428,8 @@ private:
     void CreateGraphicsPipeline() {
         // Do programmable stages; Vertex, Fragment
         // Then fixed-function parameter setup for blending mode, viewport, rasterization
+
+        // PROGRAMMABLE
         auto shaderModule = CreateShaderModule(readFile("shaders/slang.spv"));
 
         vk::PipelineShaderStageCreateInfo vertShaderStageInfo{
@@ -443,6 +446,102 @@ private:
         array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
             vertShaderStageInfo, fragShaderStageInfo
         };
+
+        // FIXED
+
+        // So much of pipeline state is immutable, baked, but
+        // some of it can be changed without recreating pipeline at draw time (viewport size, line width, blend constants)
+        vector dynamicStates = {
+            vk::DynamicState::eViewport,
+            vk::DynamicState::eScissor
+        };
+
+        vk::PipelineDynamicStateCreateInfo dynamicState{
+            .dynamicStateCount = U32T(dynamicStates.size()),
+            .pDynamicStates = dynamicStates.data()
+        };
+        // Choosing to make this dynamic will make us HAVE TO specify it at drawing time and the baked config vals for it will be ignored
+
+        // Format of vertex data = (bindings = spacing, attribute desc = types of attributes)
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+        // won't use for now since we're not using vertex buffer
+
+        vk::PipelineInputAssemblyStateCreateInfo inputAssembly = {
+            .topology = vk::PrimitiveTopology::eTriangleList
+        };
+
+        // Static examples below, but we're using dynamic so no need to specify
+        //// May differ from WIDTH, HEIGHT of window
+        //// Viewport defines transformation from image to framebuffer
+        //vk::Viewport viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height),
+        //    0.0f, 1.0f); // Range of depth vals to use for frame buffer
+
+        //// Scissor rectangle discards pixels out of the region
+        //// While viewport rectangle stretches image into it
+        //vk::Rect2D scissorRect(vk::Offset2D{ 0,0 }, swapChainExtent);
+
+        vk::PipelineViewportStateCreateInfo viewportState = {
+            .viewportCount = 1,
+            .scissorCount = 1
+        };
+
+        // RASTERIZER
+        vk::PipelineRasterizationStateCreateInfo rasterizer = {
+            .depthClampEnable = vk::False, // frags beyond near far plane are clamped to them instead of discarded, using this requres enabling a gpu feature
+            .rasterizerDiscardEnable = vk::False, // disables output to framebuffer
+            .polygonMode = vk::PolygonMode::eFill, // could be used for lines or points (requires gpu feature for non fill)
+            .cullMode = vk::CullModeFlagBits::eBack,
+            .frontFace = vk::FrontFace::eClockwise,
+            .depthBiasEnable = vk::False, // could alter depth vals based on const or frags slope or wtver
+            .depthBiasSlopeFactor = 1.0f,
+            .lineWidth = 1.0f // > 1 requires gpu feature
+        };
+
+        // Disable multisampling (anti-aliasing, but better than rendering to high res => downsampling)
+        vk::PipelineMultisampleStateCreateInfo multiSampling = {
+            .rasterizationSamples = vk::SampleCountFlagBits::e1,
+            .sampleShadingEnable = vk::False
+        };
+
+        // we'll do depth and stencil testing later
+
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment = {
+            .blendEnable = vk::True,
+
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .colorBlendOp = vk::BlendOp::eAdd,
+
+            .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp = vk::BlendOp::eAdd,
+
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+        };
+
+        // Pseudo Code below demonstrates blending
+        /*if (blendEnable) {
+            finalColor.rgb = (srcColorBlendFactor * newColor.rgb) COLORBLEND_OP (dstColorBlendFactor * oldColor.rgb);
+            finalColor.a = (srcAlphaBlendFactor * newColor.a) ALPHABLEND_OP (dstAlphaBlendFactor * oldColor.a);
+        }
+        else {
+            finalColor = newColor;
+        }
+        finalColor = finalColor & colorWriteMask;*/
+
+        vk::PipelineColorBlendStateCreateInfo colorBlending = {
+            .logicOpEnable = vk::False, // Alternate method of color blending we won't use since we're using the normal method above (will auto DISABLE FIRST METHOD)
+            .logicOp = vk::LogicOp::eCopy, // That method is specifying Blending Logic Here
+            .attachmentCount = 1,
+            .pAttachments = &colorBlendAttachment
+        };
+
+        // empty pipeline layout for now, no uniforms
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {
+            .setLayoutCount = 0,
+            .pushConstantRangeCount = 0 // different way of pushing dynamic vals to shaders
+        };
+        pipelineLayout = PipelineLayout(device, pipelineLayoutInfo);
 
     }
 
