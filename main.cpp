@@ -22,6 +22,8 @@ using namespace vk::raii;
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
+constexpr int MAX_FRAMES_IN_FLIGHT = 2; // Shouldn't be too many, don't want GPU to fall behind CPU
+
 static vector<char> readFile(const std::string& fileName) {
     std::ifstream file(fileName,
         std::ios::ate | // start from end of file to easily get filesize
@@ -82,11 +84,13 @@ private:
     vk::raii::Pipeline graphicsPipeline = nullptr;
 
     vk::raii::CommandPool commandPool = nullptr;
-    vk::raii::CommandBuffer commandBuffer = nullptr;
+    vector<vk::raii::CommandBuffer> commandBuffers;
 
-    vk::raii::Semaphore presentCompleteSemaphore = nullptr;
-    vk::raii::Semaphore renderFinishedSemaphore = nullptr;
-    vk::raii::Fence drawFence = nullptr;
+    vector<vk::raii::Semaphore> presentCompleteSemaphores;
+    vector<vk::raii::Semaphore> renderFinishedSemaphores;
+    vector<vk::raii::Fence> drawFences;
+
+    uint32_t currFrameIndex;
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
     const bool enableValidationLayers = false;
@@ -604,19 +608,20 @@ private:
 
     }
 
-    void CreateCommandBuffer() {
+    void CreateCommandBuffers() {
         vk::CommandBufferAllocateInfo allocateInfo = {
             .commandPool = commandPool,
             .level = vk::CommandBufferLevel::ePrimary, // submitted to queue directly, not used by other cmd bufs, secondary helpful for reusing command ops from primary
-            .commandBufferCount = 1 // command makes multiple, we want one
+            .commandBufferCount = MAX_FRAMES_IN_FLIGHT // command makes multiple, we want one
         };
-        commandBuffer = std::move(vk::raii::CommandBuffers(device, allocateInfo).front()); // have to move it from buffers list like uPtr
+        commandBuffers = vk::raii::CommandBuffers(device, allocateInfo);
     }
 
     // images can be in different layouts at different times
     // depending on what we're using the img for
     // presenting has a diff layout than rendering (for optimization sake)
     void TransitionImageLayout(
+        vk::raii::CommandBuffer& commandBuffer,
         uint32_t imageIndex,
 
         vk::ImageLayout oldLayout,
@@ -649,12 +654,13 @@ private:
         commandBuffer.pipelineBarrier2(dependencyInfo);
     }
 
-    void RecordCommandBuffer(uint32_t imageIndex) {
+    void RecordCommandBuffer(vk::raii::CommandBuffer& commandBuffer, uint32_t imageIndex) {
         // if cmd buffer already was recorded, beginning will reset it.  we can't append once we record a cmd buffer, only reset
         commandBuffer.begin({}); // could put flags in here
 
         // Transition to COLOR ATTACHMENT OPTIMAL
         TransitionImageLayout(
+            commandBuffer,
             imageIndex,
             vk::ImageLayout::eUndefined, // From any?
             vk::ImageLayout::eColorAttachmentOptimal, // To this format
@@ -698,6 +704,7 @@ private:
 
         // Have to transition image layout to presentable format
         TransitionImageLayout(
+            commandBuffer,
             imageIndex,
             vk::ImageLayout::eColorAttachmentOptimal,
             vk::ImageLayout::ePresentSrcKHR,
@@ -711,11 +718,22 @@ private:
     }
 
     void CreateSyncObjects() {
-        presentCompleteSemaphore = vk::raii::Semaphore(device, vk::SemaphoreCreateInfo());
-        renderFinishedSemaphore = vk::raii::Semaphore(device, vk::SemaphoreCreateInfo());
-        drawFence = vk::raii::Fence(device, {
+        assert(
+            presentCompleteSemaphores.empty() &&
+            renderFinishedSemaphores.empty() &&
+            drawFences.empty()
+        );
+
+        for (size_t i = 0; i < swapChainImages.size(); i++) {
+            renderFinishedSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
+        }
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            presentCompleteSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
+            drawFences.emplace_back(device, vk::FenceCreateInfo{
             .flags = vk::FenceCreateFlagBits::eSignaled
-            });
+                });
+        }
     }
 
     void InitVulkan() {
@@ -731,7 +749,7 @@ private:
         CreateGraphicsPipeline();
 
         CreateCommandPool();
-        CreateCommandBuffer();
+        CreateCommandBuffers();
 
         CreateSyncObjects();
     }
@@ -755,19 +773,26 @@ private:
         // Semaphores preferably since we don't block host
 
 
-
+        auto& drawFence = drawFences[currFrameIndex];
+        auto& presentCompleteSemaphore = presentCompleteSemaphores[currFrameIndex];
+        auto& commandBuffer = commandBuffers[currFrameIndex];
 
         // Wait until prev frame finished
         // Takes in array of fences, true indicates we want to wait for all of em, UINT64_MAX is the timeout, effectively disabled
-        presentQueue.waitIdle();//auto fenceResult = device.waitForFences(*drawFence, vk::True, UINT64_MAX);
-        
+        auto fenceResult = device.waitForFences(*drawFence, vk::True, UINT64_MAX);
+        if (fenceResult != vk::Result::eSuccess) {
+            throw new std::runtime_error("Failed to wait for fence");
+        }
+        device.resetFences(*drawFence); // Put fence back up
 
         // Grab img from framebuffer now that prev frame done
         // presentCompleteSemaphore is signaled when image is finished being used
         auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
+        auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex];
     
         // Record drawing cmds
-        RecordCommandBuffer(imageIndex);
+        commandBuffer.reset();
+        RecordCommandBuffer(commandBuffer, imageIndex);
 
         device.resetFences(*drawFence); // put the fence up
         vk::PipelineStageFlags waitDstStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
@@ -784,10 +809,6 @@ private:
         };
 
         graphicsQueue.submit(submitInfo, *drawFence); // Fence will be put down when done
-        auto fenceResult = device.waitForFences(*drawFence, vk::True, UINT64_MAX);
-        if (fenceResult != vk::Result::eSuccess) {
-            throw std::runtime_error("Failed to wait for fence");
-        }
 
         const vk::PresentInfoKHR presentInfoKHR = {
             .waitSemaphoreCount = 1,
@@ -797,7 +818,12 @@ private:
             .pSwapchains = &*swapChain,
             .pImageIndices = &imageIndex
         };
-        presentQueue.presentKHR(presentInfoKHR);
+        if (presentQueue.presentKHR(presentInfoKHR) != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to present");
+        }
+
+        // Advance to next frame
+        currFrameIndex = (currFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     void MainLoop() {
