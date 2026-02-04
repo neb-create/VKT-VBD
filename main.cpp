@@ -92,18 +92,28 @@ private:
 
     uint32_t currFrameIndex;
 
+    // True when user resizes
+    bool frameBufferResized = false;
+
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
     const bool enableValidationLayers = false;
 #else
     const bool enableValidationLayers = true;
 #endif
 
+    static void FrameBufferResizeCallback(GLFWwindow* window, int width, int height) {
+        auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+        app->frameBufferResized = true;
+    }
+
     void InitWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // GLFW was for OpenGL, tell it don't create OpenGL Context
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "VulkanTESTT", nullptr, nullptr); // 4th param is Monitor
+        glfwSetWindowUserPointer(window, this); // Give window a pointer to app
+        glfwSetFramebufferSizeCallback(window, FrameBufferResizeCallback);
     }
 
     static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type, const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, void*) {
@@ -378,7 +388,7 @@ private:
             imageCount = surfaceCapabilities.maxImageCount;
         }
 
-        vk::SwapchainCreateInfoKHR swapChainCreateInfo{
+        vk::SwapchainCreateInfoKHR swapChainCreateInfo = {
             .flags = vk::SwapchainCreateFlagsKHR(),
             .surface = *surface,
             .minImageCount = imageCount,
@@ -688,7 +698,7 @@ private:
         // START RENDER
         // All record cmds return void so no error handling til we finished recording
         commandBuffer.beginRendering(renderingInfo);
-        
+
         // graphics or compute?
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
 
@@ -734,6 +744,28 @@ private:
             .flags = vk::FenceCreateFlagBits::eSignaled
                 });
         }
+    }
+
+    void CleanupSwapChain() {
+        swapChainImageViews.clear();
+        swapChain = nullptr;
+    }
+
+    void RecreateSwapChain() {
+        // In case, user minimized, wait til it's not minimized
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window, &width, &height);
+        while (width == 0 || height == 0) {
+            glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
+        }
+
+        device.waitIdle();
+
+        CleanupSwapChain();
+
+        CreateSwapchain();
+        CreateImageViews();
     }
 
     void InitVulkan() {
@@ -783,19 +815,28 @@ private:
         if (fenceResult != vk::Result::eSuccess) {
             throw new std::runtime_error("Failed to wait for fence");
         }
-        device.resetFences(*drawFence); // Put fence back up
 
         // Grab img from framebuffer now that prev frame done
         // presentCompleteSemaphore is signaled when image is finished being used
         auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
-        auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex];
-    
+        if (result == vk::Result::eErrorOutOfDateKHR) { // frameBufferResized just in case app doesn't automatically do outOfDate
+            RecreateSwapChain();
+            return;
+        }
+        else if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) { // suboptimal still ok
+            throw new std::runtime_error("Failed to acquire swap chain img");
+        }
+
+        // We know we're not returning early, so put the fence back up so it'll be signaled on draw
+        device.resetFences(*drawFence); // Put fence back up
+
+        auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex]; // This semaphore is per image because if it was per frame, a different frame in flight could be using a different semaphore on an image that hasn't finished being rendered to, since the semaphore would be different, it'd go through and we'd overwrite the image being drawn to
+
         // Record drawing cmds
         commandBuffer.reset();
         RecordCommandBuffer(commandBuffer, imageIndex);
 
-        device.resetFences(*drawFence); // put the fence up
-        vk::PipelineStageFlags waitDstStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
+        vk::PipelineStageFlags waitDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submitInfo = {
             .waitSemaphoreCount = 1,
             .pWaitSemaphores = &*presentCompleteSemaphore, // Wait for this semaphore to
@@ -818,8 +859,13 @@ private:
             .pSwapchains = &*swapChain,
             .pImageIndices = &imageIndex
         };
-        if (presentQueue.presentKHR(presentInfoKHR) != vk::Result::eSuccess) {
-            throw std::runtime_error("Failed to present");
+        result = presentQueue.presentKHR(presentInfoKHR);
+        if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || frameBufferResized) {
+            frameBufferResized = false;
+            RecreateSwapChain();
+        }
+        else {
+            assert(result == vk::Result::eSuccess);
         }
 
         // Advance to next frame
@@ -837,6 +883,8 @@ private:
     }
 
     void Cleanup() {
+        CleanupSwapChain();
+
         // GLFW
         glfwDestroyWindow(window);
         glfwTerminate();
