@@ -15,6 +15,9 @@ import vulkan_hpp;
 #include <cstdlib>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 #define U32T(v) (static_cast<uint32_t>(v))
 
@@ -26,6 +29,13 @@ constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2; // Shouldn't be too many, don't want GPU to fall behind CPU
+
+struct UniformBufferObject {
+    alignas(4) float off;
+    alignas(16) mat4 model;
+    alignas(16) mat4 view;
+    alignas(16) mat4 proj;
+};
 
 struct Vertex {
     vec2 pos;
@@ -53,8 +63,8 @@ const vector<Vertex> vertices = {
 
 // Need uint32_t for massive meshes
 const vector<uint16_t> indices = {
-    2, 1, 0,
-    2, 3, 1
+    0, 1, 2,
+    1, 3, 2
 };
 
 static vector<char> readFile(const std::string& fileName) {
@@ -113,6 +123,7 @@ private:
     // We own so raii (unlike swapChainImages)?
     vector<vk::raii::ImageView> swapChainImageViews;
 
+    vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr;
 
@@ -133,6 +144,13 @@ private:
     DeviceMemory vertexBufferMemory = nullptr;
     Buffer indexBuffer = nullptr;
     DeviceMemory indexBufferMemory = nullptr;
+
+    vector<Buffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
+    vector<DeviceMemory> uniformBuffersMemory;
+    std::vector<void*> uniformBuffersMapped;
+
+    DescriptorPool descriptorPool = nullptr;
+    vector<DescriptorSet> descriptorSets;
     
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
@@ -623,9 +641,9 @@ private:
             .pAttachments = &colorBlendAttachment
         };
 
-        // empty pipeline layout for now, no uniforms
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {
-            .setLayoutCount = 0,
+            .setLayoutCount = 1,
+            .pSetLayouts = &*descriptorSetLayout,
             .pushConstantRangeCount = 0 // different way of pushing dynamic vals to shaders
         };
         pipelineLayout = PipelineLayout(device, pipelineLayoutInfo);
@@ -711,7 +729,7 @@ private:
         commandBuffer.pipelineBarrier2(dependencyInfo);
     }
 
-    void RecordCommandBuffer(vk::raii::CommandBuffer& commandBuffer, uint32_t imageIndex) {
+    void RecordCommandBuffer(vk::raii::CommandBuffer& commandBuffer, uint32_t imageIndex, uint32_t frameIndex) {
         // if cmd buffer already was recorded, beginning will reset it.  we can't append once we record a cmd buffer, only reset
         commandBuffer.begin({}); // could put flags in here
 
@@ -755,6 +773,8 @@ private:
         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height)));
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
 
+        // graphics pipeline, pipeline layout descriptors r based on, index of first descriptor, array of sets to bind
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSets[frameIndex], nullptr);
         // IndexCount, InstanceCount, IndexBufferOffset, VertexBufferOffset, InstanceOffset
         commandBuffer.drawIndexed(indices.size(), 1, 0, 0, 0);
 
@@ -906,6 +926,87 @@ private:
         CopyBuffer(stagingBuffer, indexBuffer, bufferSize);
     }
 
+    void CreateUniformBuffers() {
+        uniformBuffers.clear(); // In case this is used as 'recreate'
+        uniformBuffersMemory.clear();
+        uniformBuffersMapped.clear();
+
+        // No staging buffer cuz we're updating this like every frame
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+            Buffer buffer = nullptr;
+            DeviceMemory bufferMemory = nullptr;
+            CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                &buffer, &bufferMemory);
+            uniformBuffers.emplace_back(std::move(buffer)); 
+            uniformBuffersMemory.emplace_back(std::move(bufferMemory));
+            uniformBuffersMapped.emplace_back(uniformBuffersMemory[i].mapMemory(0, bufferSize));
+            // We don't unmap, it's persistent mapping
+        }
+    }
+
+    void CreateDescriptorSetLayout() {
+        // Layout of descriptor set (sorta pointers to uniform buffer)
+        vk::DescriptorSetLayoutBinding uboLayoutBinding(
+            0, // Binding index used in shader
+            vk::DescriptorType::eUniformBuffer, // Type 
+            1, // How many objects?
+            vk::ShaderStageFlagBits::eVertex, // Where can we reference 
+            nullptr); // Image sampling (later)
+
+        vk::DescriptorSetLayoutCreateInfo layoutInfo = {
+            .bindingCount = 1,
+            .pBindings = &uboLayoutBinding
+        };
+        descriptorSetLayout = DescriptorSetLayout(device, layoutInfo);
+    }
+
+    // Need to create a pool for creating descriptor sets
+    void CreateDescriptorPool() {
+        vk::DescriptorPoolSize poolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT);
+        vk::DescriptorPoolCreateInfo poolInfo = {
+            .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+            .maxSets = MAX_FRAMES_IN_FLIGHT,
+
+            .poolSizeCount = 1,
+            .pPoolSizes = &poolSize
+        };
+        descriptorPool = DescriptorPool(device, poolInfo);
+    }
+
+    void CreateDescriptorSets() {
+        vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout);
+        vk::DescriptorSetAllocateInfo allocateInfo = {
+            .descriptorPool = descriptorPool,
+            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
+            .pSetLayouts = layouts.data()
+        };
+
+        // Allocate
+        descriptorSets.clear();
+        descriptorSets = device.allocateDescriptorSets(allocateInfo);
+        assert(descriptorSets.size() == MAX_FRAMES_IN_FLIGHT);
+
+        // Configure descriptor sets
+        for (size_t i = 0; i < layouts.size(); i++) {
+            // Descriptors that use buffers are configured with DescriptorBufferInfo
+            vk::DescriptorBufferInfo bufferInfo = {
+                .buffer = uniformBuffers[i],
+                .offset = 0,
+                .range = sizeof(UniformBufferObject)
+            };
+            vk::WriteDescriptorSet descriptorWrite = {
+                .dstSet = descriptorSets[i], // descriptor set to update
+                .dstBinding = 0, // binding from beginning of CreateDescriptorSetLayout
+                .dstArrayElement = 0, // descriptors can be arrays
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &bufferInfo // for buffer data, pImageInfo would be used for image data
+            };
+            device.updateDescriptorSets(descriptorWrite, {});
+        }
+    }
+
     void InitVulkan() {
         CreateInstance();
         SetupDebugMessenger();
@@ -916,6 +1017,7 @@ private:
         CreateSwapchain();
         CreateImageViews();
 
+        CreateDescriptorSetLayout();
         CreateGraphicsPipeline();
 
         CreateCommandPool();
@@ -925,6 +1027,27 @@ private:
 
         CreateVertexBuffer();
         CreateIndexBuffer();
+        CreateUniformBuffers();
+
+        CreateDescriptorPool();
+        CreateDescriptorSets();
+    }
+
+    void UpdateUniformBuffer(uint32_t currFrame) {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    
+        UniformBufferObject ubo = {
+            .off = time,
+            .model = glm::rotate(mat4(1.0f), -glm::radians(45.0f), vec3(1.0f,0.0f,0.0f)) * glm::rotate(mat4(1.0f), time, vec3(0.0f, 0.0f, 1.0f)),
+            .view = glm::lookAt(vec3(0,0,5), vec3(0), vec3(0,1,0)),
+            .proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f), // TODO: increase far
+        };
+        // glm::perspective outputs flipped y clip space, compensate
+        ubo.proj[1][1] *= -1.0f;
+        
+        memcpy(uniformBuffersMapped[currFrame], &ubo, sizeof(ubo));
     }
 
     void DrawFrame() {
@@ -957,6 +1080,8 @@ private:
             throw new std::runtime_error("Failed to wait for fence");
         }
 
+        UpdateUniformBuffer(currFrameIndex);
+
         // Grab img from framebuffer now that prev frame done
         // presentCompleteSemaphore is signaled when image is finished being used
         auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
@@ -975,7 +1100,7 @@ private:
 
         // Record drawing cmds
         commandBuffer.reset();
-        RecordCommandBuffer(commandBuffer, imageIndex);
+        RecordCommandBuffer(commandBuffer, imageIndex, currFrameIndex);
 
         vk::PipelineStageFlags waitDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submitInfo = {
