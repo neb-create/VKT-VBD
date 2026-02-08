@@ -19,6 +19,9 @@ import vulkan_hpp;
 
 #include <chrono>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 #define U32T(v) (static_cast<uint32_t>(v))
 
 using namespace std;
@@ -40,25 +43,27 @@ struct UniformBufferObject {
 struct Vertex {
     vec2 pos;
     vec3 color;
+    vec2 uv;
 
     static vk::VertexInputBindingDescription getBindingDescription() {
         return { 0, sizeof(Vertex), vk::VertexInputRate::eVertex }; // binding index, stride, load data per vertex
     }
 
-    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
+    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
         // Location, Binding Index
         return {
             vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, pos)),
-            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color))
+            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color)),
+            vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, uv))
         };
     }
 };
 
 const vector<Vertex> vertices = {
-    {vec2(-0.5f, -0.5f), vec3(1.0f, 1.0f, 0.0f)},
-    {vec2(-0.5f, 0.5f), vec3(0.0f, 1.0f, 0.0f)},
-    {vec2(0.5f, -0.5f), vec3(0.0f, 0.0f, 1.0f)},
-    {vec2(0.5f, 0.5f), vec3(1.0f, 1.0f, 1.0f)}
+    {vec2(-0.5f, -0.5f), vec3(1.0f, 1.0f, 0.0f), vec2(0,0)},
+    {vec2(-0.5f, 0.5f), vec3(0.0f, 1.0f, 0.0f), vec2(0,1)},
+    {vec2(0.5f, -0.5f), vec3(0.0f, 0.0f, 1.0f), vec2(1,0)},
+    {vec2(0.5f, 0.5f), vec3(1.0f, 1.0f, 1.0f), vec2(1,1)}
 };
 
 // Need uint32_t for massive meshes
@@ -103,6 +108,7 @@ private:
     vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
     vk::raii::SurfaceKHR surface = nullptr;
     vk::raii::PhysicalDevice physicalDevice = nullptr;
+    vk::PhysicalDeviceProperties physicalDeviceProperties;
 
     const vector<const char*> desiredValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -151,6 +157,11 @@ private:
 
     DescriptorPool descriptorPool = nullptr;
     vector<DescriptorSet> descriptorSets;
+
+    Image textureImage = nullptr;
+    DeviceMemory textureImageMemory = nullptr;
+    ImageView textureImageView = nullptr;
+    Sampler textureSampler = nullptr;
     
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
@@ -276,6 +287,7 @@ private:
 
         // Must support API Version >= 1.3
         bool isSuitable = physicalDevice.getProperties().apiVersion >= VK_API_VERSION_1_3;
+        isSuitable = isSuitable && deviceFeatures.samplerAnisotropy;
 
         // It must have a queue family that supports graphics calls (we assume it has presentation)
         auto queueFamilies = physicalDevice.getQueueFamilyProperties();
@@ -347,6 +359,7 @@ private:
             throw std::runtime_error("Couldn't find suitable GPU!");
         }
         physicalDevice = *devIter;
+        physicalDeviceProperties = physicalDevice.getProperties();
     }
 
     uint32_t graphicsIndex, presentIndex;
@@ -368,7 +381,7 @@ private:
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT // D
         >
             featureChain = {
-                {}, // constructor for A,
+                {.features = {.samplerAnisotropy = true }}, // constructor for A,
                 {.shaderDrawParameters = true}, // B
                 {.synchronization2 = true, .dynamicRendering = true}, // constructor for C, dynamic rendering is a modern simplification
                 {.extendedDynamicState = true}
@@ -865,7 +878,9 @@ private:
         // GPU data guaranteed to be there by next queueSubmit
     }
 
-    void CopyBuffer(vk::raii::Buffer& src, vk::raii::Buffer& dst, vk::DeviceSize size) {
+    // For practical applications, you should combine multiple operations into single command buffer instead of beginning and ending with like one command and then waiting on idle queue (CopyBuffer..)
+    // Can try that
+    CommandBuffer BeginOneTimeCommands() {
         // Create a temp command buf, could create a different one for this exclusive purpose
         vk::CommandBufferAllocateInfo allocInfo{ .commandPool = commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1 };
         vk::raii::CommandBuffer cmd = std::move(device.allocateCommandBuffers(allocInfo).front());
@@ -873,11 +888,20 @@ private:
         cmd.begin(vk::CommandBufferBeginInfo{
             .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
             });
-        cmd.copyBuffer(src, dst, vk::BufferCopy(0, 0, size)); // From where to where
-        cmd.end();
+        return cmd;
+    }
+
+    void SubmitOneTimeCommands(CommandBuffer* cmd) {
+        cmd->end();
         // Graphics queue MUST support TRANSFER BIT
-        graphicsQueue.submit(vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &*cmd }, nullptr);
+        graphicsQueue.submit(vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &**cmd }, nullptr);
         graphicsQueue.waitIdle(); // fence would be necessary with multiple transfers scheduled simultaneously
+    }
+
+    void CopyBuffer(vk::raii::Buffer& src, vk::raii::Buffer& dst, vk::DeviceSize size) {
+        auto cmd = BeginOneTimeCommands();
+        cmd.copyBuffer(src, dst, vk::BufferCopy(0, 0, size)); // From where to where
+        SubmitOneTimeCommands(&cmd);
     }
 
     void CreateVertexBuffer() {
@@ -946,30 +970,44 @@ private:
     }
 
     void CreateDescriptorSetLayout() {
-        // Layout of descriptor set (sorta pointers to uniform buffer)
-        vk::DescriptorSetLayoutBinding uboLayoutBinding(
-            0, // Binding index used in shader
-            vk::DescriptorType::eUniformBuffer, // Type 
-            1, // How many objects?
-            vk::ShaderStageFlagBits::eVertex, // Where can we reference 
-            nullptr); // Image sampling (later)
+        // Layout of descriptor set (sorta pointers to uniforms)
+        array bindings = {
+            vk::DescriptorSetLayoutBinding(
+                0, // Binding index used in shader
+                vk::DescriptorType::eUniformBuffer, // Type 
+                1, // How many objects?
+                vk::ShaderStageFlagBits::eVertex, // Where can we reference 
+                nullptr), // Image sampling (later)
+
+            vk::DescriptorSetLayoutBinding(
+                1,
+                vk::DescriptorType::eCombinedImageSampler,
+                1,
+                vk::ShaderStageFlagBits::eFragment,
+                nullptr),
+        };
 
         vk::DescriptorSetLayoutCreateInfo layoutInfo = {
-            .bindingCount = 1,
-            .pBindings = &uboLayoutBinding
+            .bindingCount = bindings.size(),
+            .pBindings = bindings.data()
         };
         descriptorSetLayout = DescriptorSetLayout(device, layoutInfo);
     }
 
     // Need to create a pool for creating descriptor sets
     void CreateDescriptorPool() {
-        vk::DescriptorPoolSize poolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT);
+        // Inadequate descriptor pools may not be caught by validation layers
+        std::array poolSize = {
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
+            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT)
+        };
+  
         vk::DescriptorPoolCreateInfo poolInfo = {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
             .maxSets = MAX_FRAMES_IN_FLIGHT,
 
-            .poolSizeCount = 1,
-            .pPoolSizes = &poolSize
+            .poolSizeCount = poolSize.size(),
+            .pPoolSizes = poolSize.data()
         };
         descriptorPool = DescriptorPool(device, poolInfo);
     }
@@ -995,16 +1033,209 @@ private:
                 .offset = 0,
                 .range = sizeof(UniformBufferObject)
             };
-            vk::WriteDescriptorSet descriptorWrite = {
-                .dstSet = descriptorSets[i], // descriptor set to update
-                .dstBinding = 0, // binding from beginning of CreateDescriptorSetLayout
-                .dstArrayElement = 0, // descriptors can be arrays
-                .descriptorCount = 1,
-                .descriptorType = vk::DescriptorType::eUniformBuffer,
-                .pBufferInfo = &bufferInfo // for buffer data, pImageInfo would be used for image data
+            vk::DescriptorImageInfo imageInfo = { 
+                .sampler = textureSampler, 
+                .imageView = textureImageView, 
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal 
             };
-            device.updateDescriptorSets(descriptorWrite, {});
+            std::array descriptorWrites = {
+                vk::WriteDescriptorSet {
+                    .dstSet = descriptorSets[i], // descriptor set to update
+                    .dstBinding = 0, // binding from beginning of CreateDescriptorSetLayout
+                    .dstArrayElement = 0, // descriptors can be arrays
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eUniformBuffer,
+                    .pBufferInfo = &bufferInfo // for buffer data, pImageInfo would be used for image data
+                },
+
+                vk::WriteDescriptorSet{
+                    .dstSet = descriptorSets[i],
+                    .dstBinding = 1,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+                    .pImageInfo = &imageInfo
+                }
+            };
+            
+            device.updateDescriptorSets(descriptorWrites, {});
         }
+    }
+
+    void CreateImage(uint32_t width, uint32_t height, 
+        vk::Format format, 
+        vk::ImageTiling tiling,
+        vk::ImageUsageFlags usage, 
+        vk::MemoryPropertyFlags properties, 
+        vk::raii::Image* image, vk::raii::DeviceMemory* imageMemory) {
+
+        vk::ImageCreateInfo imageInfo = {
+            .imageType = vk::ImageType::e2D,
+            .format = format, // Same format as pixels in staging buffer
+            .extent = {width, height, 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1, // could be used to store sparsely, useful for 3D textures of voxel terrain with lots of air
+            .tiling = tiling, // how to arrange texels Optimal = Implementation Dependent, Efficient while Linear = Linearly laid out rows (limited)
+            .usage = usage,
+            .sharingMode = vk::SharingMode::eExclusive
+        };
+        *image = Image(device, imageInfo);
+
+        vk::MemoryRequirements memRequirements = image->getMemoryRequirements();
+        vk::MemoryAllocateInfo allocInfo = {
+            .allocationSize = memRequirements.size,
+            .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties) };
+        *imageMemory = vk::raii::DeviceMemory(device, allocInfo);
+        image->bindMemory(*imageMemory, 0);
+    }
+
+    void CopyBufferToImage(const Buffer& buffer, Image* image, uint32_t width, uint32_t height) {
+        CommandBuffer cmd = BeginOneTimeCommands();
+
+        vk::BufferImageCopy region = { 
+            .bufferOffset = 0, 
+            .bufferRowLength = 0, // 0 implies tightly packed
+            .bufferImageHeight = 0,
+            
+            // where to copy the pixels to?
+            .imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 }, 
+            .imageOffset = {0, 0, 0}, 
+            .imageExtent = {width, height, 1} 
+        };
+        // Assume image has already been transitioned to optimal layout at this point
+        cmd.copyBufferToImage(buffer, *image, vk::ImageLayout::eTransferDstOptimal, { region });
+
+        SubmitOneTimeCommands(&cmd);
+    }
+
+    void TransitionImageLayoutBasic(const Image& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+        auto cmd = BeginOneTimeCommands();
+
+        vk::ImageMemoryBarrier barrier = {
+            .oldLayout = oldLayout,
+            .newLayout = newLayout,
+            .image = image,
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+        };
+
+        // SourceStage which pipeline stages must happen before barrier
+        // DestinationStage which pipeline stage waits on barrier
+        // eByRegion means barrier is a per region condition
+        vk::PipelineStageFlags srcStage, dstStage;
+        // Hardcode layout transitions
+        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
+            // Undefined -> Transfer Destination
+            barrier.srcAccessMask = {};
+            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+            srcStage = vk::PipelineStageFlagBits::eTopOfPipe; // No waiting needed, earliest possible stage to wait on
+            dstStage = vk::PipelineStageFlagBits::eTransfer;
+        }
+        else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            // Transfer Destination -> Shader Reading
+            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+            srcStage = vk::PipelineStageFlagBits::eTransfer;
+            dstStage = vk::PipelineStageFlagBits::eFragmentShader;
+        }
+        else {
+            throw std::invalid_argument("unsupported layout transition");
+        }
+
+
+        cmd.pipelineBarrier(srcStage, dstStage, {}, {}, nullptr, barrier);
+        SubmitOneTimeCommands(&cmd);
+    }
+
+    void CreateTextureImage() {
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load("textures/vulkanTutorialImage.jpg", 
+            &texWidth, &texHeight, &texChannels, 
+            STBI_rgb_alpha); // Forces loading alpha channel even if one doesnt exist
+        vk::DeviceSize imageByteSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("failed to load texture image");
+        }
+
+        // Staging to get the actual data closer to GPU (which we cant directly write to ig)
+        Buffer stagingBuffer = nullptr;
+        DeviceMemory stagingBufferMemory = nullptr;
+        CreateBuffer(imageByteSize, 
+            vk::BufferUsageFlagBits::eTransferSrc, 
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
+            &stagingBuffer, &stagingBufferMemory);
+        void* data = stagingBufferMemory.mapMemory(0, imageByteSize);
+        memcpy(data, pixels, imageByteSize);
+        stagingBufferMemory.unmapMemory();
+
+        stbi_image_free(pixels);
+
+        // We want to copy from the image staging buffer to an image (not just a buffer)
+        CreateImage(texWidth, texHeight,
+            vk::Format::eR8G8B8A8Srgb,
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            &textureImage, &textureImageMemory);
+        
+        // We need to transition this image through multiple layouts
+        // Undefined -> Optimized for Receiving Data -> Optimized for Shader Reading
+        TransitionImageLayoutBasic(textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        CopyBufferToImage(stagingBuffer, &textureImage, 
+            static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+    
+        TransitionImageLayoutBasic(textureImage, 
+            vk::ImageLayout::eTransferDstOptimal, 
+            vk::ImageLayout::eShaderReadOnlyOptimal);
+
+
+    }
+
+    ImageView CreateImageView(const Image& image, vk::Format format) {
+        vk::ImageViewCreateInfo viewInfo = { 
+            .image = textureImage, 
+            .viewType = vk::ImageViewType::e2D, 
+            .format = vk::Format::eR8G8B8A8Srgb,
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } 
+        };
+        return ImageView(device, viewInfo);
+    }
+
+    void CreateTextureImageView() {
+        textureImageView = CreateImageView(textureImage, vk::Format::eR8G8B8A8Srgb);
+    }
+
+    void CreateTextureSampler() {
+        vk::SamplerCreateInfo samplerInfo = { 
+            .magFilter = vk::Filter::eLinear, 
+            .minFilter = vk::Filter::eLinear,  
+
+            .mipmapMode = vk::SamplerMipmapMode::eLinear,
+            
+
+            .addressModeU = vk::SamplerAddressMode::eRepeat, 
+            .addressModeV = vk::SamplerAddressMode::eRepeat,
+
+            .anisotropyEnable = vk::True, // One frag sampling from lots of texels
+            .maxAnisotropy = physicalDeviceProperties.limits.maxSamplerAnisotropy,
+        
+            .compareEnable = vk::False, 
+            .compareOp = vk::CompareOp::eAlways,
+
+            .borderColor = vk::BorderColor::eIntOpaqueBlack, // Only matters with clamp to border addressing mode
+            .unnormalizedCoordinates = vk::False, // Use texDim for sampling or (0,1)
+
+            
+        };
+        samplerInfo.mipLodBias = 0.0f;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 0.0f;
+
+        // Sampler can be applied to any image
+        textureSampler = Sampler(device, samplerInfo);
     }
 
     void InitVulkan() {
@@ -1028,6 +1259,10 @@ private:
         CreateVertexBuffer();
         CreateIndexBuffer();
         CreateUniformBuffers();
+
+        CreateTextureImage();
+        CreateTextureImageView();
+        CreateTextureSampler();
 
         CreateDescriptorPool();
         CreateDescriptorSets();
