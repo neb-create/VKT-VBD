@@ -110,7 +110,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\VulkanSDK\1.4.335.0\Include;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glm-1.0.3;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\VulkanSDK\1.4.335.0\Include;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glm-1.0.3;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glfw-3.4.bin.WIN64\include;C:\Users\explo\Documents\Visual Studio 2022\Libraries\stb;C:\Users\explo\Documents\Visual Studio 2022\Libraries\tinyobjloader;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -128,7 +128,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\VulkanSDK\1.4.335.0\Include;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glm-1.0.3;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\VulkanSDK\1.4.335.0\Include;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glm-1.0.3;C:\Users\explo\Documents\Visual Studio 2022\Libraries\glfw-3.4.bin.WIN64\include;C:\Users\explo\Documents\Visual Studio 2022\Libraries\stb;C:\Users\explo\Documents\Visual Studio 2022\Libraries\tinyobjloader;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -139,7 +139,24 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="core\command-helper.cpp" />
+    <ClCompile Include="core\memory-helper.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="scene\buffer.cpp" />
+    <ClCompile Include="scene\pipeline.cpp" />
+    <ClCompile Include="scene\texture.cpp" />
+    <ClCompile Include="single_implementations.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\shader.slang" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="core\command-helper.h" />
+    <ClInclude Include="core\memory-helper.h" />
+    <ClInclude Include="defines.h" />
+    <ClInclude Include="scene\buffer.h" />
+    <ClInclude Include="scene\pipeline.h" />
+    <ClInclude Include="scene\texture.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

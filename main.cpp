@@ -1,12 +1,4 @@
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
-#if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
-#	include <vulkan/vulkan_raii.hpp>
-#else
-import vulkan_hpp;
-#endif
-
-#define GLFW_INCLUDE_VULKAN // GLFW auto-loads Vulkan header
-#include <GLFW/glfw3.h>
+#include "defines.h"
 
 #include <iostream>
 #include <fstream>
@@ -16,21 +8,10 @@ import vulkan_hpp;
 
 #include <chrono>
 
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE // Force projection matrix to have (0,1) depth instead of (-1,1)
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-// We need these for our hash functinos
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/hash.hpp>
-
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <tiny_obj_loader.h>
-
-#define U32T(v) (static_cast<uint32_t>(v))
+#include "scene/buffer.h"
+#include "scene/texture.h"
+#include "core/command-helper.h"
+#include "core/memory-helper.h"
 
 using namespace std;
 using namespace vk::raii;
@@ -87,27 +68,6 @@ namespace std {
     };
 }
 
-//const vector<Vertex> vertices = {
-//    {vec3(-0.5f, -0.5f, 0.0f), vec3(1.0f, 1.0f, 0.0f), vec2(0,0)},
-//    {vec3(-0.5f, 0.5f, 0.0f), vec3(0.0f, 1.0f, 0.0f), vec2(0,1)},
-//    {vec3(0.5f, -0.5f, 0.0f), vec3(0.0f, 0.0f, 1.0f), vec2(1,0)},
-//    {vec3(0.5f, 0.5f, 0.0f), vec3(1.0f, 1.0f, 1.0f), vec2(1,1)},
-//
-//    {vec3(-0.5f, -0.5f, -.5f), vec3(1.0f, 1.0f, 0.0f), vec2(0,0)},
-//    {vec3(-0.5f, 0.5f, .5f), vec3(0.0f, 1.0f, 0.0f), vec2(0,1)},
-//    {vec3(0.5f, -0.5f, .5f), vec3(0.0f, 0.0f, 1.0f), vec2(1,0)},
-//    {vec3(0.5f, 0.5f, .5f), vec3(1.0f, 1.0f, 1.0f), vec2(1,1)},
-//};
-//
-//// Need uint32_t for massive meshes
-//const vector<uint32_t> indices = {
-//    2, 1, 0,
-//    2, 3, 1,
-//
-//    6, 5, 4,
-//    6, 7, 5,
-//};
-
 static vector<char> readFile(const std::string& fileName) {
     std::ifstream file(fileName,
         std::ios::ate | // start from end of file to easily get filesize
@@ -143,16 +103,16 @@ private:
     vk::raii::Instance instance = nullptr;
     vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
     vk::raii::SurfaceKHR surface = nullptr;
-    vk::raii::PhysicalDevice physicalDevice = nullptr;
+    
     vk::PhysicalDeviceProperties physicalDeviceProperties;
 
     const vector<const char*> desiredValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
 
-    Device device = nullptr;
+    VulkanReferences coreReferences;
     Queue presentQueue = nullptr;
-    Queue graphicsQueue = nullptr;
+    // Queue graphicsQueue = nullptr;
     vector<const char*> desiredDeviceExtensions = {
         vk::KHRSwapchainExtensionName
     };
@@ -169,7 +129,7 @@ private:
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr;
 
-    vk::raii::CommandPool commandPool = nullptr;
+    // vk::raii::CommandPool commandPool = nullptr;
     vector<vk::raii::CommandBuffer> commandBuffers;
 
     vector<vk::raii::Semaphore> presentCompleteSemaphores;
@@ -177,9 +137,10 @@ private:
     vector<vk::raii::Fence> drawFences;
 
     // Only one image since only one draw op running at once
-    Image depthImage = nullptr;
+    /*Image depthImage = nullptr;
     DeviceMemory depthImageMemory = nullptr;
-    ImageView depthImageView = nullptr;
+    ImageView depthImageView = nullptr;*/
+    WTexture depthTexture;
 
     uint32_t currFrameIndex;
 
@@ -190,22 +151,19 @@ private:
     vector<Vertex> vertices;
     vector<uint32_t> indices;
 
-    Buffer vertexBuffer = nullptr;
-    DeviceMemory vertexBufferMemory = nullptr;
-    Buffer indexBuffer = nullptr;
-    DeviceMemory indexBufferMemory = nullptr;
+    WBuffer vertexBuffer;
+    WBuffer indexBuffer;
 
-    vector<Buffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
-    vector<DeviceMemory> uniformBuffersMemory;
-    std::vector<void*> uniformBuffersMapped;
+    vector<WBuffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
 
     DescriptorPool descriptorPool = nullptr;
     vector<DescriptorSet> descriptorSets;
 
-    Image textureImage = nullptr;
+    WTexture testTexture;
+    /*Image textureImage = nullptr;
     DeviceMemory textureImageMemory = nullptr;
     ImageView textureImageView = nullptr;
-    Sampler textureSampler = nullptr;
+    Sampler textureSampler = nullptr;*/
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
     const bool enableValidationLayers = false;
@@ -401,14 +359,14 @@ private:
         if (devIter == devices.end()) {
             throw std::runtime_error("Couldn't find suitable GPU!");
         }
-        physicalDevice = *devIter;
-        physicalDeviceProperties = physicalDevice.getProperties();
+        coreReferences.physicalDevice = *devIter;
+        physicalDeviceProperties = coreReferences.physicalDevice.getProperties();
     }
 
     uint32_t graphicsIndex, presentIndex;
     void CreateLogicalDevice() {
         // uint32_t graphicsIndex, presentIndex; // Very likely same qFamily
-        FindQueueFamilyIndices(physicalDevice, &graphicsIndex, &presentIndex);
+        FindQueueFamilyIndices(coreReferences.physicalDevice, &graphicsIndex, &presentIndex);
         float queuePriority = 0.5f; // [0,1] mandatory even if 1 queue
         vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
             .queueFamilyIndex = graphicsIndex, // Index within physical device
@@ -438,9 +396,9 @@ private:
             .ppEnabledExtensionNames = desiredDeviceExtensions.data() // Device specific extensions
         }; // Device specific validation layers obsolete so not here
 
-        device = Device(physicalDevice, deviceCreateInfo);
-        graphicsQueue = Queue(device, graphicsIndex, 0); // Get queue from our new device, 0 is the queue index within family, only 1 queue so we put 0
-        presentQueue = Queue(device, presentIndex, 0);
+        coreReferences.device = Device(coreReferences.physicalDevice, deviceCreateInfo);
+        coreReferences.graphicsQueue = Queue(coreReferences.device, graphicsIndex, 0); // Get queue from our new device, 0 is the queue index within family, only 1 queue so we put 0
+        presentQueue = Queue(coreReferences.device, presentIndex, 0);
         cout << "Graphics Index: " << graphicsIndex << endl;
         cout << "Present Index: " << presentIndex << endl;
     }
@@ -486,9 +444,9 @@ private:
     }
 
     void CreateSwapchain() {
-        vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR(surface);
-        vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR(surface);
-        auto surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
+        vector<vk::SurfaceFormatKHR> availableFormats = coreReferences.physicalDevice.getSurfaceFormatsKHR(surface);
+        vector<vk::PresentModeKHR> availablePresentModes = coreReferences.physicalDevice.getSurfacePresentModesKHR(surface);
+        auto surfaceCapabilities = coreReferences.physicalDevice.getSurfaceCapabilitiesKHR(surface);
 
         swapSurfaceFormat = ChooseSwapSurfaceFormat(availableFormats);
         auto presentMode = ChooseSwapPresentMode(availablePresentModes);
@@ -531,7 +489,7 @@ private:
             swapChainCreateInfo.pQueueFamilyIndices = nullptr;
         }
 
-        swapChain = SwapchainKHR(device, swapChainCreateInfo);
+        swapChain = SwapchainKHR(coreReferences.device, swapChainCreateInfo);
         swapChainImages = swapChain.getImages();
     }
 
@@ -562,7 +520,7 @@ private:
         for (auto image : swapChainImages) {
             imageViewCreateInfo.image = image;
             // vk::raii::ImageView imgView = vk::raii::ImageView(device, imageViewCreateInfo); then pushing back Doesn't work without moving ig
-            swapChainImageViews.emplace_back(device, imageViewCreateInfo); // constructs ImageView then pushes
+            swapChainImageViews.emplace_back(coreReferences.device, imageViewCreateInfo); // constructs ImageView then pushes
         }
 
     }
@@ -574,7 +532,7 @@ private:
             .pCode = reinterpret_cast<const uint32_t*>(compiledCode.data()) // compiledCode.data() is char* but we wanna read vector as if it has uint32_t (1 byte to 4 byte is dangerous for alignment but vector is aligned to 4 bytes so we good)
         };
 
-        vk::raii::ShaderModule shaderModule(device, createInfo);
+        vk::raii::ShaderModule shaderModule(coreReferences.device, createInfo);
 
         return shaderModule;
     }
@@ -702,7 +660,7 @@ private:
             .pSetLayouts = &*descriptorSetLayout,
             .pushConstantRangeCount = 0 // different way of pushing dynamic vals to shaders
         };
-        pipelineLayout = PipelineLayout(device, pipelineLayoutInfo);
+        pipelineLayout = PipelineLayout(coreReferences.device, pipelineLayoutInfo);
 
         // Depth & stencil state
         vk::PipelineDepthStencilStateCreateInfo depthStencil = {
@@ -738,7 +696,7 @@ private:
         };
 
         // nullptr is PipelineCache object which stores creation info across multiple calls to create pipeline, speed up pipeline creation significantly
-        graphicsPipeline = vk::raii::Pipeline(device, nullptr, pipelineInfo);
+        graphicsPipeline = vk::raii::Pipeline(coreReferences.device, nullptr, pipelineInfo);
 
     }
 
@@ -747,17 +705,17 @@ private:
             .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer, // cmd buffers in pool can be rerecorded individually instead of together
             .queueFamilyIndex = graphicsIndex // all these cmd buffers are only for graphics
         };
-        commandPool = vk::raii::CommandPool(device, poolInfo);
+        coreReferences.commandPool = vk::raii::CommandPool(coreReferences.device, poolInfo);
 
     }
 
     void CreateCommandBuffers() {
         vk::CommandBufferAllocateInfo allocateInfo = {
-            .commandPool = commandPool,
+            .commandPool = coreReferences.commandPool,
             .level = vk::CommandBufferLevel::ePrimary, // submitted to queue directly, not used by other cmd bufs, secondary helpful for reusing command ops from primary
             .commandBufferCount = MAX_FRAMES_IN_FLIGHT // command makes multiple, we want one
         };
-        commandBuffers = vk::raii::CommandBuffers(device, allocateInfo);
+        commandBuffers = vk::raii::CommandBuffers(coreReferences.device, allocateInfo);
     }
 
     // images can be in different layouts at different times
@@ -818,7 +776,7 @@ private:
         // Transition the depth image to its optimal (from whatever it was we dont care)
         TransitionImageLayout(
             commandBuffer,
-            *depthImage,
+            *depthTexture.image,
             vk::ImageLayout::eUndefined,
             vk::ImageLayout::eDepthAttachmentOptimal,
             vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -839,7 +797,7 @@ private:
 
         vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
         vk::RenderingAttachmentInfo depthAttachmentInfo = {
-            .imageView = depthImageView,
+            .imageView = depthTexture.view,
             .imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
             .loadOp = vk::AttachmentLoadOp::eClear,
             .storeOp = vk::AttachmentStoreOp::eDontCare, // no need to keep depth
@@ -861,8 +819,8 @@ private:
 
         // Bind Graphics Pipeline and Geo Data
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
-        commandBuffer.bindVertexBuffers(0, *vertexBuffer, { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
-        commandBuffer.bindIndexBuffer(*indexBuffer, 0, vk::IndexType::eUint32);
+        commandBuffer.bindVertexBuffers(0, *(vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
+        commandBuffer.bindIndexBuffer(*(indexBuffer.buffer), 0, vk::IndexType::eUint32);
 
         // remember in the pipeline we specified viewport and scissor state as dynamic, so we gotta specify them now
         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
@@ -900,12 +858,12 @@ private:
         );
 
         for (size_t i = 0; i < swapChainImages.size(); i++) {
-            renderFinishedSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
+            renderFinishedSemaphores.emplace_back(coreReferences.device, vk::SemaphoreCreateInfo());
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            presentCompleteSemaphores.emplace_back(device, vk::SemaphoreCreateInfo());
-            drawFences.emplace_back(device, vk::FenceCreateInfo{
+            presentCompleteSemaphores.emplace_back(coreReferences.device, vk::SemaphoreCreateInfo());
+            drawFences.emplace_back(coreReferences.device, vk::FenceCreateInfo{
             .flags = vk::FenceCreateFlagBits::eSignaled
                 });
         }
@@ -925,7 +883,7 @@ private:
             glfwWaitEvents();
         }
 
-        device.waitIdle();
+        coreReferences.device.waitIdle();
 
         CleanupSwapChain();
 
@@ -935,83 +893,55 @@ private:
         CreateDepthResources();
     }
 
-    uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
-        // Find what memory vertex buffer shoul use
-        vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
+    //uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+    //    // Find what memory vertex buffer shoul use
+    //    vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
 
-        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-            if (
-                (typeFilter & (1 << i)) && // is in our type filter
-                (memProperties.memoryTypes[i].propertyFlags & properties) == properties // has at least all props we want
-                ) {
-                return i;
-            }
-        }
+    //    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+    //        if (
+    //            (typeFilter & (1 << i)) && // is in our type filter
+    //            (memProperties.memoryTypes[i].propertyFlags & properties) == properties // has at least all props we want
+    //            ) {
+    //            return i;
+    //        }
+    //    }
 
-        throw std::runtime_error("failed to find suitable memory type");
-    }
+    //    throw std::runtime_error("failed to find suitable memory type");
+    //}
 
-    void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer* buffer, vk::raii::DeviceMemory* bufferMemory) {
-        vk::BufferCreateInfo bufferInfo{ .size = size, .usage = usage, .sharingMode = vk::SharingMode::eExclusive };
-        *buffer = vk::raii::Buffer(device, bufferInfo);
+    //void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer* buffer, vk::raii::DeviceMemory* bufferMemory) {
+    //    vk::BufferCreateInfo bufferInfo{ .size = size, .usage = usage, .sharingMode = vk::SharingMode::eExclusive };
+    //    *buffer = vk::raii::Buffer(device, bufferInfo);
 
-        vk::MemoryRequirements memRequirements = buffer->getMemoryRequirements();
-        vk::MemoryAllocateInfo allocInfo{ .allocationSize = memRequirements.size, .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties) };
-        *bufferMemory = vk::raii::DeviceMemory(device, allocInfo);
-        buffer->bindMemory(*bufferMemory, 0); // 0 is offset within memory region, nonzero needs divisible by memRequirements.alignment
-        // hostCoherence ensures CPU memory = GPU memory so dont need to explicitly time this
-        // GPU data guaranteed to be there by next queueSubmit
-    }
-
-    // For practical applications, you should combine multiple operations into single command buffer instead of beginning and ending with like one command and then waiting on idle queue (CopyBuffer..)
-    // Can try that
-    CommandBuffer BeginOneTimeCommands() {
-        // Create a temp command buf, could create a different one for this exclusive purpose
-        vk::CommandBufferAllocateInfo allocInfo{ .commandPool = commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1 };
-        vk::raii::CommandBuffer cmd = std::move(device.allocateCommandBuffers(allocInfo).front());
-        // use temporary?
-        cmd.begin(vk::CommandBufferBeginInfo{
-            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
-            });
-        return cmd;
-    }
-
-    void SubmitOneTimeCommands(CommandBuffer* cmd) {
-        cmd->end();
-        // Graphics queue MUST support TRANSFER BIT
-        graphicsQueue.submit(vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &**cmd }, nullptr);
-        graphicsQueue.waitIdle(); // fence would be necessary with multiple transfers scheduled simultaneously
-    }
-
-    void CopyBuffer(vk::raii::Buffer& src, vk::raii::Buffer& dst, vk::DeviceSize size) {
-        auto cmd = BeginOneTimeCommands();
-        cmd.copyBuffer(src, dst, vk::BufferCopy(0, 0, size)); // From where to where
-        SubmitOneTimeCommands(&cmd);
-    }
+    //    vk::MemoryRequirements memRequirements = buffer->getMemoryRequirements();
+    //    vk::MemoryAllocateInfo allocInfo{ .allocationSize = memRequirements.size, .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties) };
+    //    *bufferMemory = vk::raii::DeviceMemory(device, allocInfo);
+    //    buffer->bindMemory(*bufferMemory, 0); // 0 is offset within memory region, nonzero needs divisible by memRequirements.alignment
+    //    // hostCoherence ensures CPU memory = GPU memory so dont need to explicitly time this
+    //    // GPU data guaranteed to be there by next queueSubmit
+    //}
 
     void CreateVertexBuffer() {
         vk::DeviceSize bufferSize = sizeof(Vertex) * vertices.size();
 
-        vk::raii::Buffer stagingBuffer = nullptr;;
-        vk::raii::DeviceMemory stagingMemory = nullptr;
-        CreateBuffer(bufferSize,
+        WBuffer stagingBuffer;
+        stagingBuffer.Create(coreReferences, bufferSize,
             vk::BufferUsageFlagBits::eTransferSrc, // Can be source of a transfer
             vk::MemoryPropertyFlagBits::eHostVisible |
-            vk::MemoryPropertyFlagBits::eHostCoherent,
-            &stagingBuffer, &stagingMemory);
+            vk::MemoryPropertyFlagBits::eHostCoherent); // Continue converting everything into using buffer object, then create a references class filled with POINTERS to important info with static Ins
 
         // Fill Vertex Buffer w Data
-        void* stagingMemoryData = stagingMemory.mapMemory(0, bufferSize); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
-        memcpy(stagingMemoryData, vertices.data(), bufferSize);
-        stagingMemory.unmapMemory();
+        stagingBuffer.MapMemory(); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
+        memcpy(stagingBuffer.mappedMemory, vertices.data(), bufferSize);
+        stagingBuffer.UnmapMemory();
 
-        CreateBuffer(bufferSize,
+        vertexBuffer.Create(coreReferences, bufferSize,
             vk::BufferUsageFlagBits::eVertexBuffer |
             vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal, // Device local, can't map memory directly
-            &vertexBuffer, &vertexBufferMemory);
+            vk::MemoryPropertyFlagBits::eDeviceLocal // Device local, can't map memory directly
+            );
 
-        CopyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+        vertexBuffer.CopyFrom(coreReferences, stagingBuffer);
         // Staging buffer will be cleaned up RAII
         // Staging allows us to use high performance memory for loading vertex data
         // In practice, not good to do a separate allocation for every object, better to do one big one and split it up (VulkanMemoryAllocator library)
@@ -1021,36 +951,26 @@ private:
     void CreateIndexBuffer() {
         vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
 
-        Buffer stagingBuffer = nullptr;
-        DeviceMemory stagingMemory = nullptr;
-        CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-            &stagingBuffer, &stagingMemory);
-        void* data = stagingMemory.mapMemory(0, bufferSize);
-        memcpy(data, indices.data(), bufferSize);
-        stagingMemory.unmapMemory();
+        WBuffer stagingBuffer;
+        stagingBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+        stagingBuffer.MapMemory();
+        memcpy(stagingBuffer.mappedMemory, indices.data(), bufferSize);
+        stagingBuffer.UnmapMemory();
 
-        CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal,
-            &indexBuffer, &indexBufferMemory);
+        indexBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        CopyBuffer(stagingBuffer, indexBuffer, bufferSize);
+        indexBuffer.CopyFrom(coreReferences, stagingBuffer);
     }
 
     void CreateUniformBuffers() {
         uniformBuffers.clear(); // In case this is used as 'recreate'
-        uniformBuffersMemory.clear();
-        uniformBuffersMapped.clear();
 
         // No staging buffer cuz we're updating this like every frame
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
-            Buffer buffer = nullptr;
-            DeviceMemory bufferMemory = nullptr;
-            CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-                &buffer, &bufferMemory);
-            uniformBuffers.emplace_back(std::move(buffer)); 
-            uniformBuffersMemory.emplace_back(std::move(bufferMemory));
-            uniformBuffersMapped.emplace_back(uniformBuffersMemory[i].mapMemory(0, bufferSize));
-            // We don't unmap, it's persistent mapping
+            uniformBuffers.emplace_back();
+            uniformBuffers.back().Create(coreReferences, sizeof(UniformBufferObject), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            uniformBuffers.back().MapMemory();
+            // Persistent mapping
         }
     }
 
@@ -1076,7 +996,7 @@ private:
             .bindingCount = bindings.size(),
             .pBindings = bindings.data()
         };
-        descriptorSetLayout = DescriptorSetLayout(device, layoutInfo);
+        descriptorSetLayout = DescriptorSetLayout(coreReferences.device, layoutInfo);
     }
 
     // Need to create a pool for creating descriptor sets
@@ -1094,7 +1014,7 @@ private:
             .poolSizeCount = poolSize.size(),
             .pPoolSizes = poolSize.data()
         };
-        descriptorPool = DescriptorPool(device, poolInfo);
+        descriptorPool = DescriptorPool(coreReferences.device, poolInfo);
     }
 
     void CreateDescriptorSets() {
@@ -1107,20 +1027,20 @@ private:
 
         // Allocate
         descriptorSets.clear();
-        descriptorSets = device.allocateDescriptorSets(allocateInfo);
+        descriptorSets = coreReferences.device.allocateDescriptorSets(allocateInfo);
         assert(descriptorSets.size() == MAX_FRAMES_IN_FLIGHT);
 
         // Configure descriptor sets
         for (size_t i = 0; i < layouts.size(); i++) {
             // Descriptors that use buffers are configured with DescriptorBufferInfo
             vk::DescriptorBufferInfo bufferInfo = {
-                .buffer = uniformBuffers[i],
+                .buffer = uniformBuffers[i].buffer,
                 .offset = 0,
                 .range = sizeof(UniformBufferObject)
             };
             vk::DescriptorImageInfo imageInfo = { 
-                .sampler = textureSampler, 
-                .imageView = textureImageView, 
+                .sampler = testTexture.GetSampler(),
+                .imageView = testTexture.view, 
                 .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal 
             };
             std::array descriptorWrites = {
@@ -1143,95 +1063,8 @@ private:
                 }
             };
             
-            device.updateDescriptorSets(descriptorWrites, {});
+            coreReferences.device.updateDescriptorSets(descriptorWrites, {});
         }
-    }
-
-    void CreateImage(uint32_t width, uint32_t height, 
-        vk::Format format, 
-        vk::ImageTiling tiling,
-        vk::ImageUsageFlags usage, 
-        vk::MemoryPropertyFlags properties, 
-        vk::raii::Image* image, vk::raii::DeviceMemory* imageMemory) {
-
-        vk::ImageCreateInfo imageInfo = {
-            .imageType = vk::ImageType::e2D,
-            .format = format, // Same format as pixels in staging buffer
-            .extent = {width, height, 1},
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = vk::SampleCountFlagBits::e1, // could be used to store sparsely, useful for 3D textures of voxel terrain with lots of air
-            .tiling = tiling, // how to arrange texels Optimal = Implementation Dependent, Efficient while Linear = Linearly laid out rows (limited)
-            .usage = usage,
-            .sharingMode = vk::SharingMode::eExclusive
-        };
-        *image = Image(device, imageInfo);
-
-        vk::MemoryRequirements memRequirements = image->getMemoryRequirements();
-        vk::MemoryAllocateInfo allocInfo = {
-            .allocationSize = memRequirements.size,
-            .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties) };
-        *imageMemory = vk::raii::DeviceMemory(device, allocInfo);
-        image->bindMemory(*imageMemory, 0);
-    }
-
-    void CopyBufferToImage(const Buffer& buffer, Image* image, uint32_t width, uint32_t height) {
-        CommandBuffer cmd = BeginOneTimeCommands();
-
-        vk::BufferImageCopy region = { 
-            .bufferOffset = 0, 
-            .bufferRowLength = 0, // 0 implies tightly packed
-            .bufferImageHeight = 0,
-            
-            // where to copy the pixels to?
-            .imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 }, 
-            .imageOffset = {0, 0, 0}, 
-            .imageExtent = {width, height, 1} 
-        };
-        // Assume image has already been transitioned to optimal layout at this point
-        cmd.copyBufferToImage(buffer, *image, vk::ImageLayout::eTransferDstOptimal, { region });
-
-        SubmitOneTimeCommands(&cmd);
-    }
-
-    void TransitionImageLayoutBasic(const Image& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-        auto cmd = BeginOneTimeCommands();
-
-        vk::ImageMemoryBarrier barrier = {
-            .oldLayout = oldLayout,
-            .newLayout = newLayout,
-            .image = image,
-            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
-        };
-
-        // SourceStage which pipeline stages must happen before barrier
-        // DestinationStage which pipeline stage waits on barrier
-        // eByRegion means barrier is a per region condition
-        vk::PipelineStageFlags srcStage, dstStage;
-        // Hardcode layout transitions
-        if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal) {
-            // Undefined -> Transfer Destination
-            barrier.srcAccessMask = {};
-            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-
-            srcStage = vk::PipelineStageFlagBits::eTopOfPipe; // No waiting needed, earliest possible stage to wait on
-            dstStage = vk::PipelineStageFlagBits::eTransfer;
-        }
-        else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-            // Transfer Destination -> Shader Reading
-            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-            srcStage = vk::PipelineStageFlagBits::eTransfer;
-            dstStage = vk::PipelineStageFlagBits::eFragmentShader;
-        }
-        else {
-            throw std::invalid_argument("unsupported layout transition");
-        }
-
-
-        cmd.pipelineBarrier(srcStage, dstStage, {}, {}, nullptr, barrier);
-        SubmitOneTimeCommands(&cmd);
     }
 
     void CreateTextureImage(const string& path) {
@@ -1246,86 +1079,36 @@ private:
         }
 
         // Staging to get the actual data closer to GPU (which we cant directly write to ig)
-        Buffer stagingBuffer = nullptr;
-        DeviceMemory stagingBufferMemory = nullptr;
-        CreateBuffer(imageByteSize, 
+        WBuffer stagingBuffer;
+        stagingBuffer.Create(coreReferences, imageByteSize, 
             vk::BufferUsageFlagBits::eTransferSrc, 
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, 
-            &stagingBuffer, &stagingBufferMemory);
-        void* data = stagingBufferMemory.mapMemory(0, imageByteSize);
-        memcpy(data, pixels, imageByteSize);
-        stagingBufferMemory.unmapMemory();
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+        stagingBuffer.MapMemory();
+        memcpy(stagingBuffer.mappedMemory, pixels, imageByteSize);
+        stagingBuffer.UnmapMemory();
 
         stbi_image_free(pixels);
 
         // We want to copy from the image staging buffer to an image (not just a buffer)
-        CreateImage(texWidth, texHeight,
+        testTexture.Create(coreReferences, texWidth, texHeight,
             vk::Format::eR8G8B8A8Srgb,
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-            vk::MemoryPropertyFlagBits::eDeviceLocal,
-            &textureImage, &textureImageMemory);
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
         
         // We need to transition this image through multiple layouts
         // Undefined -> Optimized for Receiving Data -> Optimized for Shader Reading
-        TransitionImageLayoutBasic(textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-        CopyBufferToImage(stagingBuffer, &textureImage, 
-            static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-    
-        TransitionImageLayoutBasic(textureImage, 
-            vk::ImageLayout::eTransferDstOptimal, 
-            vk::ImageLayout::eShaderReadOnlyOptimal);
+        testTexture.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        testTexture.CopyFromBuffer(coreReferences, stagingBuffer);
+        testTexture.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
 
+        testTexture.CreateSampler(coreReferences);
 
-    }
-
-    ImageView CreateImageView(const Image& image, vk::Format format, vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor) {
-        vk::ImageViewCreateInfo viewInfo = { 
-            .image = image, 
-            .viewType = vk::ImageViewType::e2D, 
-            .format = format,
-            .subresourceRange = { aspectFlags, 0, 1, 0, 1 } 
-        };
-        return ImageView(device, viewInfo);
-    }
-
-    void CreateTextureImageView() {
-        textureImageView = CreateImageView(textureImage, vk::Format::eR8G8B8A8Srgb);
-    }
-
-    void CreateTextureSampler() {
-        vk::SamplerCreateInfo samplerInfo = { 
-            .magFilter = vk::Filter::eLinear, 
-            .minFilter = vk::Filter::eLinear,  
-
-            .mipmapMode = vk::SamplerMipmapMode::eLinear,
-            
-
-            .addressModeU = vk::SamplerAddressMode::eRepeat, 
-            .addressModeV = vk::SamplerAddressMode::eRepeat,
-
-            .anisotropyEnable = vk::True, // One frag sampling from lots of texels
-            .maxAnisotropy = physicalDeviceProperties.limits.maxSamplerAnisotropy,
-        
-            .compareEnable = vk::False, 
-            .compareOp = vk::CompareOp::eAlways,
-
-            .borderColor = vk::BorderColor::eIntOpaqueBlack, // Only matters with clamp to border addressing mode
-            .unnormalizedCoordinates = vk::False, // Use texDim for sampling or (0,1)
-
-            
-        };
-        samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 0.0f;
-
-        // Sampler can be applied to any image
-        textureSampler = Sampler(device, samplerInfo);
     }
 
     vk::Format FindSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
         for (const auto format : candidates) {
-            vk::FormatProperties props = physicalDevice.getFormatProperties(format);
+            vk::FormatProperties props = coreReferences.physicalDevice.getFormatProperties(format);
         
             if (
                 (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) ||
@@ -1357,21 +1140,13 @@ private:
 
     void CreateDepthResources() {
         vk::Format depthFormat = GetDepthFormat();
-
-        CreateImage(
+        depthTexture.Create(coreReferences,
             swapChainExtent.width, swapChainExtent.height, 
             depthFormat, 
             vk::ImageTiling::eOptimal, 
             vk::ImageUsageFlagBits::eDepthStencilAttachment, 
-            vk::MemoryPropertyFlagBits::eDeviceLocal, 
-            &depthImage, &depthImageMemory);
-        assert(depthImage != nullptr);
-        depthImageView = CreateImageView(
-            depthImage, depthFormat, 
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
             vk::ImageAspectFlagBits::eDepth);
-
-        // No need to fill up our copy or whatever our image once created
-        // We're going to clear it at start of render
     }
 
     void LoadModel(const std::string& path) {
@@ -1444,8 +1219,6 @@ private:
         CreateDepthResources();
 
         CreateTextureImage(TEXTURE_PATH);
-        CreateTextureImageView();
-        CreateTextureSampler();
 
         CreateDescriptorPool();
         CreateDescriptorSets();
@@ -1468,7 +1241,7 @@ private:
      */   // glm::perspective outputs flipped y clip space, compensate
         ubo.proj[1][1] *= -1.0f;
         
-        memcpy(uniformBuffersMapped[currFrame], &ubo, sizeof(ubo));
+        memcpy(uniformBuffers[currFrame].mappedMemory, &ubo, sizeof(ubo));
     }
 
     void DrawFrame() {
@@ -1496,7 +1269,7 @@ private:
 
         // Wait until prev frame finished
         // Takes in array of fences, true indicates we want to wait for all of em, UINT64_MAX is the timeout, effectively disabled
-        auto fenceResult = device.waitForFences(*drawFence, vk::True, UINT64_MAX);
+        auto fenceResult = coreReferences.device.waitForFences(*drawFence, vk::True, UINT64_MAX);
         if (fenceResult != vk::Result::eSuccess) {
             throw new std::runtime_error("Failed to wait for fence");
         }
@@ -1515,7 +1288,7 @@ private:
         }
 
         // We know we're not returning early, so put the fence back up so it'll be signaled on draw
-        device.resetFences(*drawFence); // Put fence back up
+        coreReferences.device.resetFences(*drawFence); // Put fence back up
 
         auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex]; // This semaphore is per image because if it was per frame, a different frame in flight could be using a different semaphore on an image that hasn't finished being rendered to, since the semaphore would be different, it'd go through and we'd overwrite the image being drawn to
 
@@ -1536,7 +1309,7 @@ private:
             .pSignalSemaphores = &*renderFinishedSemaphore // Signal once done
         };
 
-        graphicsQueue.submit(submitInfo, *drawFence); // Fence will be put down when done
+        coreReferences.graphicsQueue.submit(submitInfo, *drawFence); // Fence will be put down when done
 
         const vk::PresentInfoKHR presentInfoKHR = {
             .waitSemaphoreCount = 1,
@@ -1566,7 +1339,7 @@ private:
         }
 
         // When we exit, wait for lingering commands to finish
-        device.waitIdle();
+        coreReferences.device.waitIdle();
     }
 
     void Cleanup() {
