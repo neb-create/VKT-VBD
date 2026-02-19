@@ -12,6 +12,9 @@
 #include "scene/texture.h"
 #include "core/command-helper.h"
 #include "core/memory-helper.h"
+#include "scene/mesh.h"
+#include "scene/pipeline.h"
+#include "scene/material.h"
 
 using namespace std;
 using namespace vk::raii;
@@ -21,71 +24,6 @@ constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 const string MODEL_PATH = "models/blob.obj";
 const string TEXTURE_PATH = "textures/viking_room.png";
-
-constexpr int MAX_FRAMES_IN_FLIGHT = 2; // Shouldn't be too many, don't want GPU to fall behind CPU
-
-struct UniformBufferObject {
-    alignas(4) float off;
-    alignas(16) mat4 model;
-    alignas(16) mat4 view;
-    alignas(16) mat4 proj;
-};
-
-struct Vertex {
-    vec3 pos;
-    vec3 color;
-    vec2 uv;
-    vec3 norm;
-
-    static vk::VertexInputBindingDescription getBindingDescription() {
-        return { 0, sizeof(Vertex), vk::VertexInputRate::eVertex }; // binding index, stride, load data per vertex
-    }
-
-    static std::array<vk::VertexInputAttributeDescription, 4> getAttributeDescriptions() {
-        // Location, Binding Index
-        return {
-            vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos)),
-            vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color)),
-            vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, uv)),
-            vk::VertexInputAttributeDescription(3, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, norm))
-        };
-    }
-
-    bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && uv == other.uv && norm == other.norm;
-    }
-};
-
-// Hash Function For Vertex
-namespace std {
-    template<> struct hash<Vertex> {
-        size_t operator()(Vertex const& vertex) const {
-            return ((hash<glm::vec3>()(vertex.pos) ^
-                (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
-                (hash<glm::vec2>()(vertex.uv) << 1) ^ 
-                (hash<glm::vec3>()(vertex.norm) << 2);
-        }
-    };
-}
-
-static vector<char> readFile(const std::string& fileName) {
-    std::ifstream file(fileName,
-        std::ios::ate | // start from end of file to easily get filesize
-        std::ios::binary // read as binary
-    );
-
-    if (!file.is_open()) {
-        throw std::runtime_error("Couldn't open file");
-    }
-
-    vector<char> buffer(file.tellg()); // cursor pos is size
-    file.seekg(0, std::ios::beg);
-    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-
-    file.close();
-
-    return buffer;
-}
 
 class Application {
 public:
@@ -103,7 +41,7 @@ private:
     vk::raii::Instance instance = nullptr;
     vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
     vk::raii::SurfaceKHR surface = nullptr;
-    
+
     vk::PhysicalDeviceProperties physicalDeviceProperties;
 
     const vector<const char*> desiredValidationLayers = {
@@ -125,11 +63,8 @@ private:
     // We own so raii (unlike swapChainImages)?
     vector<vk::raii::ImageView> swapChainImageViews;
 
-    vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
-    vk::raii::PipelineLayout pipelineLayout = nullptr;
-    vk::raii::Pipeline graphicsPipeline = nullptr;
+    ShaderPipeline shaderPipeline;
 
-    // vk::raii::CommandPool commandPool = nullptr;
     vector<vk::raii::CommandBuffer> commandBuffers;
 
     vector<vk::raii::Semaphore> presentCompleteSemaphores;
@@ -137,9 +72,6 @@ private:
     vector<vk::raii::Fence> drawFences;
 
     // Only one image since only one draw op running at once
-    /*Image depthImage = nullptr;
-    DeviceMemory depthImageMemory = nullptr;
-    ImageView depthImageView = nullptr;*/
     WTexture depthTexture;
 
     uint32_t currFrameIndex;
@@ -157,13 +89,9 @@ private:
     vector<WBuffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
 
     DescriptorPool descriptorPool = nullptr;
-    vector<DescriptorSet> descriptorSets;
+    Material testMaterial;
 
     WTexture testTexture;
-    /*Image textureImage = nullptr;
-    DeviceMemory textureImageMemory = nullptr;
-    ImageView textureImageView = nullptr;
-    Sampler textureSampler = nullptr;*/
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
     const bool enableValidationLayers = false;
@@ -525,181 +453,6 @@ private:
 
     }
 
-    // [[nodiscard]] will make program throw error is programmer calls func without using return value
-    [[nodiscard]] vk::raii::ShaderModule CreateShaderModule(const vector<char>& compiledCode) const {
-        vk::ShaderModuleCreateInfo createInfo{
-            .codeSize = compiledCode.size() * sizeof(char),
-            .pCode = reinterpret_cast<const uint32_t*>(compiledCode.data()) // compiledCode.data() is char* but we wanna read vector as if it has uint32_t (1 byte to 4 byte is dangerous for alignment but vector is aligned to 4 bytes so we good)
-        };
-
-        vk::raii::ShaderModule shaderModule(coreReferences.device, createInfo);
-
-        return shaderModule;
-    }
-
-    void CreateGraphicsPipeline() {
-        // Do programmable stages; Vertex, Fragment
-        // Then fixed-function parameter setup for blending mode, viewport, rasterization
-
-        // PROGRAMMABLE
-        auto shaderModule = CreateShaderModule(readFile("shaders/slang.spv"));
-
-        vk::PipelineShaderStageCreateInfo vertShaderStageInfo{
-            .stage = vk::ShaderStageFlagBits::eVertex,
-            .module = shaderModule,
-            .pName = "vertMain" // Name of main func in shader
-        };
-        // Optional pSpecializationInfo member you can specify values for compile time shader constants (more efficient than uniform)
-        vk::PipelineShaderStageCreateInfo fragShaderStageInfo{
-            .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = shaderModule,
-            .pName = "fragMain" // Name of main func in shader
-        };
-        array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {
-            vertShaderStageInfo, fragShaderStageInfo
-        };
-
-        // FIXED
-
-        // So much of pipeline state is immutable, baked, but
-        // some of it can be changed without recreating pipeline at draw time (viewport size, line width, blend constants)
-        vector dynamicStates = {
-            vk::DynamicState::eViewport,
-            vk::DynamicState::eScissor
-        };
-
-        vk::PipelineDynamicStateCreateInfo dynamicState{
-            .dynamicStateCount = U32T(dynamicStates.size()),
-            .pDynamicStates = dynamicStates.data()
-        };
-        // Choosing to make this dynamic will make us HAVE TO specify it at drawing time and the baked config vals for it will be ignored
-
-        // Format of vertex data = (bindings = spacing, attribute desc = types of attributes)
-        auto bindingDescription = Vertex::getBindingDescription();
-        auto attributeDescriptions = Vertex::getAttributeDescriptions();
-        vk::PipelineVertexInputStateCreateInfo vertexInputInfo = {
-            .vertexBindingDescriptionCount = 1,
-            .pVertexBindingDescriptions = &bindingDescription,
-
-            .vertexAttributeDescriptionCount = attributeDescriptions.size(),
-            .pVertexAttributeDescriptions = attributeDescriptions.data()
-        };
-
-        vk::PipelineInputAssemblyStateCreateInfo inputAssembly = {
-            .topology = vk::PrimitiveTopology::eTriangleList
-        };
-
-        // Static examples below, but we're using dynamic so no need to specify
-        //// May differ from WIDTH, HEIGHT of window
-        //// Viewport defines transformation from image to framebuffer
-        //vk::Viewport viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height),
-        //    0.0f, 1.0f); // Range of depth vals to use for frame buffer
-
-        //// Scissor rectangle discards pixels out of the region
-        //// While viewport rectangle stretches image into it
-        //vk::Rect2D scissorRect(vk::Offset2D{ 0,0 }, swapChainExtent);
-
-        vk::PipelineViewportStateCreateInfo viewportState = {
-            .viewportCount = 1,
-            .scissorCount = 1
-        };
-
-        // RASTERIZER
-        vk::PipelineRasterizationStateCreateInfo rasterizer = {
-            .depthClampEnable = vk::False, // frags beyond near far plane are clamped to them instead of discarded, using this requres enabling a gpu feature
-            .rasterizerDiscardEnable = vk::False, // disables output to framebuffer
-            .polygonMode = vk::PolygonMode::eFill, // could be used for lines or points (requires gpu feature for non fill)
-            .cullMode = vk::CullModeFlagBits::eBack,
-            .frontFace = vk::FrontFace::eCounterClockwise,
-            .depthBiasEnable = vk::False, // could alter depth vals based on const or frags slope or wtver
-            .depthBiasSlopeFactor = 1.0f,
-            .lineWidth = 1.0f // > 1 requires gpu feature
-        };
-
-        // Disable multisampling (anti-aliasing, but better than rendering to high res => downsampling)
-        vk::PipelineMultisampleStateCreateInfo multiSampling = {
-            .rasterizationSamples = vk::SampleCountFlagBits::e1,
-            .sampleShadingEnable = vk::False
-        };
-
-        // we'll do depth and stencil testing later
-
-        vk::PipelineColorBlendAttachmentState colorBlendAttachment = {
-            .blendEnable = vk::True,
-
-            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
-            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
-            .colorBlendOp = vk::BlendOp::eAdd,
-
-            .srcAlphaBlendFactor = vk::BlendFactor::eOne,
-            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
-            .alphaBlendOp = vk::BlendOp::eAdd,
-
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
-        };
-
-        // Pseudo Code below demonstrates blending
-        /*if (blendEnable) {
-            finalColor.rgb = (srcColorBlendFactor * newColor.rgb) COLORBLEND_OP (dstColorBlendFactor * oldColor.rgb);
-            finalColor.a = (srcAlphaBlendFactor * newColor.a) ALPHABLEND_OP (dstAlphaBlendFactor * oldColor.a);
-        }
-        else {
-            finalColor = newColor;
-        }
-        finalColor = finalColor & colorWriteMask;*/
-
-        vk::PipelineColorBlendStateCreateInfo colorBlending = {
-            .logicOpEnable = vk::False, // Alternate method of color blending we won't use since we're using the normal method above (will auto DISABLE FIRST METHOD)
-            .logicOp = vk::LogicOp::eCopy, // That method is specifying Blending Logic Here
-            .attachmentCount = 1,
-            .pAttachments = &colorBlendAttachment
-        };
-
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo = {
-            .setLayoutCount = 1,
-            .pSetLayouts = &*descriptorSetLayout,
-            .pushConstantRangeCount = 0 // different way of pushing dynamic vals to shaders
-        };
-        pipelineLayout = PipelineLayout(coreReferences.device, pipelineLayoutInfo);
-
-        // Depth & stencil state
-        vk::PipelineDepthStencilStateCreateInfo depthStencil = {
-            .depthTestEnable = vk::True,
-            .depthWriteEnable = vk::True, // should new frags write to depth buff
-            .depthCompareOp = vk::CompareOp::eLess, // 1 is far plane 0 is near
-            .depthBoundsTestEnable = vk::False, // only keep fragments within specified depth range
-            .stencilTestEnable = vk::False // you'd need stencil component in depth/stencil image format
-        };
-
-        // Dynamic (simplified) rendering setup
-        vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo = {
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &swapSurfaceFormat.format,
-            .depthAttachmentFormat = GetDepthFormat(),
-        };
-
-        vk::GraphicsPipelineCreateInfo pipelineInfo = {
-            .pNext = &pipelineRenderingCreateInfo,
-            .stageCount = 2, .pStages = shaderStages.data(),
-            .pVertexInputState = &vertexInputInfo, .pInputAssemblyState = &inputAssembly,
-            .pViewportState = &viewportState, .pRasterizationState = &rasterizer,
-            .pMultisampleState = &multiSampling, .pDepthStencilState = &depthStencil,
-            .pColorBlendState = &colorBlending,
-            .pDynamicState = &dynamicState, .layout = pipelineLayout,
-            
-            .renderPass = nullptr, // dynamic rendering removes need for render pass
-
-            // OPTIONAL, you can make pipelines derive from a similar pipeline to simplify and speedup creation, we're not doing that here so it's optional
-            // would also need VK_PIPELINE_CREATE_DERIVATIVE_BIT
-            .basePipelineHandle = VK_NULL_HANDLE,
-            .basePipelineIndex = -1
-        };
-
-        // nullptr is PipelineCache object which stores creation info across multiple calls to create pipeline, speed up pipeline creation significantly
-        graphicsPipeline = vk::raii::Pipeline(coreReferences.device, nullptr, pipelineInfo);
-
-    }
-
     void CreateCommandPool() {
         vk::CommandPoolCreateInfo poolInfo = {
             .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer, // cmd buffers in pool can be rerecorded individually instead of together
@@ -817,8 +570,8 @@ private:
         // All record cmds return void so no error handling til we finished recording
         commandBuffer.beginRendering(renderingInfo);
 
-        // Bind Graphics Pipeline and Geo Data
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+        // Bind GraphGraphics Pipeline and Geo Data
+        shaderPipeline.Bind(commandBuffer);
         commandBuffer.bindVertexBuffers(0, *(vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
         commandBuffer.bindIndexBuffer(*(indexBuffer.buffer), 0, vk::IndexType::eUint32);
 
@@ -826,8 +579,7 @@ private:
         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
         commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
 
-        // graphics pipeline, pipeline layout descriptors r based on, index of first descriptor, array of sets to bind
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSets[frameIndex], nullptr);
+        shaderPipeline.BindDescriptorSets(commandBuffer, testMaterial.descriptorSets[frameIndex]);
         // IndexCount, InstanceCount, IndexBufferOffset, VertexBufferOffset, InstanceOffset
         commandBuffer.drawIndexed(indices.size(), 1, 0, 0, 0);
 
@@ -893,34 +645,6 @@ private:
         CreateDepthResources();
     }
 
-    //uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
-    //    // Find what memory vertex buffer shoul use
-    //    vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
-
-    //    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    //        if (
-    //            (typeFilter & (1 << i)) && // is in our type filter
-    //            (memProperties.memoryTypes[i].propertyFlags & properties) == properties // has at least all props we want
-    //            ) {
-    //            return i;
-    //        }
-    //    }
-
-    //    throw std::runtime_error("failed to find suitable memory type");
-    //}
-
-    //void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer* buffer, vk::raii::DeviceMemory* bufferMemory) {
-    //    vk::BufferCreateInfo bufferInfo{ .size = size, .usage = usage, .sharingMode = vk::SharingMode::eExclusive };
-    //    *buffer = vk::raii::Buffer(device, bufferInfo);
-
-    //    vk::MemoryRequirements memRequirements = buffer->getMemoryRequirements();
-    //    vk::MemoryAllocateInfo allocInfo{ .allocationSize = memRequirements.size, .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties) };
-    //    *bufferMemory = vk::raii::DeviceMemory(device, allocInfo);
-    //    buffer->bindMemory(*bufferMemory, 0); // 0 is offset within memory region, nonzero needs divisible by memRequirements.alignment
-    //    // hostCoherence ensures CPU memory = GPU memory so dont need to explicitly time this
-    //    // GPU data guaranteed to be there by next queueSubmit
-    //}
-
     void CreateVertexBuffer() {
         vk::DeviceSize bufferSize = sizeof(Vertex) * vertices.size();
 
@@ -939,7 +663,7 @@ private:
             vk::BufferUsageFlagBits::eVertexBuffer |
             vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal // Device local, can't map memory directly
-            );
+        );
 
         vertexBuffer.CopyFrom(coreReferences, stagingBuffer);
         // Staging buffer will be cleaned up RAII
@@ -974,42 +698,21 @@ private:
         }
     }
 
-    void CreateDescriptorSetLayout() {
-        // Layout of descriptor set (sorta pointers to uniforms)
-        array bindings = {
-            vk::DescriptorSetLayoutBinding(
-                0, // Binding index used in shader
-                vk::DescriptorType::eUniformBuffer, // Type 
-                1, // How many objects?
-                vk::ShaderStageFlagBits::eAllGraphics, // Where can we reference 
-                nullptr), // Image sampling (later)
-
-            vk::DescriptorSetLayoutBinding(
-                1,
-                vk::DescriptorType::eCombinedImageSampler,
-                1,
-                vk::ShaderStageFlagBits::eFragment,
-                nullptr),
-        };
-
-        vk::DescriptorSetLayoutCreateInfo layoutInfo = {
-            .bindingCount = bindings.size(),
-            .pBindings = bindings.data()
-        };
-        descriptorSetLayout = DescriptorSetLayout(coreReferences.device, layoutInfo);
-    }
-
     // Need to create a pool for creating descriptor sets
     void CreateDescriptorPool() {
         // Inadequate descriptor pools may not be caught by validation layers
         std::array poolSize = {
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT),
-            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT)
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 100*MAX_FRAMES_IN_FLIGHT),
+            vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 100*MAX_FRAMES_IN_FLIGHT)
         };
-  
+
+        // Pool Sizes denotes how many of each specific descriptor type we can allocate
+        // Max Sets denotes how many descriptor sets total we can store
+        // We make 1 big pool and use it to allocate for now
+
         vk::DescriptorPoolCreateInfo poolInfo = {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = MAX_FRAMES_IN_FLIGHT,
+            .maxSets = MAX_FRAMES_IN_FLIGHT*100,
 
             .poolSizeCount = poolSize.size(),
             .pPoolSizes = poolSize.data()
@@ -1017,60 +720,11 @@ private:
         descriptorPool = DescriptorPool(coreReferences.device, poolInfo);
     }
 
-    void CreateDescriptorSets() {
-        vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout);
-        vk::DescriptorSetAllocateInfo allocateInfo = {
-            .descriptorPool = descriptorPool,
-            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
-            .pSetLayouts = layouts.data()
-        };
-
-        // Allocate
-        descriptorSets.clear();
-        descriptorSets = coreReferences.device.allocateDescriptorSets(allocateInfo);
-        assert(descriptorSets.size() == MAX_FRAMES_IN_FLIGHT);
-
-        // Configure descriptor sets
-        for (size_t i = 0; i < layouts.size(); i++) {
-            // Descriptors that use buffers are configured with DescriptorBufferInfo
-            vk::DescriptorBufferInfo bufferInfo = {
-                .buffer = uniformBuffers[i].buffer,
-                .offset = 0,
-                .range = sizeof(UniformBufferObject)
-            };
-            vk::DescriptorImageInfo imageInfo = { 
-                .sampler = testTexture.GetSampler(),
-                .imageView = testTexture.view, 
-                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal 
-            };
-            std::array descriptorWrites = {
-                vk::WriteDescriptorSet {
-                    .dstSet = descriptorSets[i], // descriptor set to update
-                    .dstBinding = 0, // binding from beginning of CreateDescriptorSetLayout
-                    .dstArrayElement = 0, // descriptors can be arrays
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eUniformBuffer,
-                    .pBufferInfo = &bufferInfo // for buffer data, pImageInfo would be used for image data
-                },
-
-                vk::WriteDescriptorSet{
-                    .dstSet = descriptorSets[i],
-                    .dstBinding = 1,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-                    .pImageInfo = &imageInfo
-                }
-            };
-            
-            coreReferences.device.updateDescriptorSets(descriptorWrites, {});
-        }
-    }
-
+    // TODO: can do this pixel array to buffer procedure in texture.h too
     void CreateTextureImage(const string& path) {
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path.c_str(),
-            &texWidth, &texHeight, &texChannels, 
+            &texWidth, &texHeight, &texChannels,
             STBI_rgb_alpha); // Forces loading alpha channel even if one doesnt exist
         vk::DeviceSize imageByteSize = texWidth * texHeight * 4;
 
@@ -1080,8 +734,8 @@ private:
 
         // Staging to get the actual data closer to GPU (which we cant directly write to ig)
         WBuffer stagingBuffer;
-        stagingBuffer.Create(coreReferences, imageByteSize, 
-            vk::BufferUsageFlagBits::eTransferSrc, 
+        stagingBuffer.Create(coreReferences, imageByteSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         stagingBuffer.MapMemory();
         memcpy(stagingBuffer.mappedMemory, pixels, imageByteSize);
@@ -1095,7 +749,7 @@ private:
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
-        
+
         // We need to transition this image through multiple layouts
         // Undefined -> Optimized for Receiving Data -> Optimized for Shader Reading
         testTexture.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
@@ -1109,7 +763,7 @@ private:
     vk::Format FindSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
         for (const auto format : candidates) {
             vk::FormatProperties props = coreReferences.physicalDevice.getFormatProperties(format);
-        
+
             if (
                 (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) ||
                 (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features)
@@ -1123,7 +777,7 @@ private:
 
     // These formats must have stencil component
     bool HasStencilComponent(vk::Format format) {
-        return format == vk::Format::eD32SfloatS8Uint 
+        return format == vk::Format::eD32SfloatS8Uint
             || format == vk::Format::eD24UnormS8Uint;
     }
 
@@ -1141,10 +795,10 @@ private:
     void CreateDepthResources() {
         vk::Format depthFormat = GetDepthFormat();
         depthTexture.Create(coreReferences,
-            swapChainExtent.width, swapChainExtent.height, 
-            depthFormat, 
-            vk::ImageTiling::eOptimal, 
-            vk::ImageUsageFlagBits::eDepthStencilAttachment, 
+            swapChainExtent.width, swapChainExtent.height,
+            depthFormat,
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eDepthStencilAttachment,
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             vk::ImageAspectFlagBits::eDepth);
     }
@@ -1203,8 +857,7 @@ private:
         CreateSwapchain();
         CreateImageViews();
 
-        CreateDescriptorSetLayout();
-        CreateGraphicsPipeline();
+        shaderPipeline.Create(coreReferences, "shaders/slang.spv", &swapSurfaceFormat.format, GetDepthFormat());
 
         CreateCommandPool();
         CreateCommandBuffers();
@@ -1221,14 +874,14 @@ private:
         CreateTextureImage(TEXTURE_PATH);
 
         CreateDescriptorPool();
-        CreateDescriptorSets();
+        testMaterial.Create(&shaderPipeline, descriptorPool, coreReferences, uniformBuffers, testTexture);
     }
 
     void UpdateUniformBuffer(uint32_t currFrame) {
         static auto startTime = std::chrono::high_resolution_clock::now();
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-    
+
         UniformBufferObject ubo = {
             .off = time,
             .model = glm::rotate(mat4(1.0f), -glm::radians(45.0f), vec3(1.0f,0.0f,0.0f)) * glm::rotate(mat4(1.0f), time, vec3(0.0f, 0.0f, 1.0f)),
@@ -1240,7 +893,7 @@ private:
         ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
      */   // glm::perspective outputs flipped y clip space, compensate
         ubo.proj[1][1] *= -1.0f;
-        
+
         memcpy(uniformBuffers[currFrame].mappedMemory, &ubo, sizeof(ubo));
     }
 

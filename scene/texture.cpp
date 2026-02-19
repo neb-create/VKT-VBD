@@ -99,6 +99,7 @@ void WTexture::TransitionImageLayoutHardcoded(const VulkanReferences& ref, vk::I
 }
 
 void WTexture::CreateSampler(const VulkanReferences& ref) {
+    assert(!hasSampler);
     vk::SamplerCreateInfo samplerInfo = {
         .magFilter = vk::Filter::eLinear,
         .minFilter = vk::Filter::eLinear,
