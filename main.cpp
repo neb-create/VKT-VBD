@@ -22,7 +22,7 @@ using namespace glm;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
-const string MODEL_PATH = "models/blob.obj";
+const string MODEL_PATH = "models/viking_room.obj";
 const string TEXTURE_PATH = "textures/viking_room.png";
 
 class Application {
@@ -92,6 +92,9 @@ private:
     Material testMaterial;
 
     WTexture testTexture;
+    WTexture metallic;
+    WTexture roughness;
+    WTexture ao;
 
 #ifdef NDEBUG // Not Debug, Part of C++ Standard
     const bool enableValidationLayers = false;
@@ -720,8 +723,8 @@ private:
         descriptorPool = DescriptorPool(coreReferences.device, poolInfo);
     }
 
-    // TODO: can do this pixel array to buffer procedure in texture.h too
-    void CreateTextureImage(const string& path) {
+    // TODO: Put this in texture.h make it a CreateFromFile function alternative to Create.. should also have isCreated variable mabye
+    void CreateTextureImage(WTexture& tex, const string& path) {
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path.c_str(),
             &texWidth, &texHeight, &texChannels,
@@ -744,7 +747,7 @@ private:
         stbi_image_free(pixels);
 
         // We want to copy from the image staging buffer to an image (not just a buffer)
-        testTexture.Create(coreReferences, texWidth, texHeight,
+        tex.Create(coreReferences, texWidth, texHeight,
             vk::Format::eR8G8B8A8Srgb,
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
@@ -752,11 +755,11 @@ private:
 
         // We need to transition this image through multiple layouts
         // Undefined -> Optimized for Receiving Data -> Optimized for Shader Reading
-        testTexture.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-        testTexture.CopyFromBuffer(coreReferences, stagingBuffer);
-        testTexture.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+        tex.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        tex.CopyFromBuffer(coreReferences, stagingBuffer);
+        tex.TransitionImageLayoutHardcoded(coreReferences, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
 
-        testTexture.CreateSampler(coreReferences);
+        tex.CreateSampler(coreReferences);
 
     }
 
@@ -864,17 +867,24 @@ private:
 
         CreateSyncObjects();
 
-        LoadModel(MODEL_PATH);
+        LoadModel("models/morrisChair.obj");// two - case-MONEY_triang - LP.obj");// MODEL_PATH);
         CreateVertexBuffer();
         CreateIndexBuffer();
         CreateUniformBuffers();
 
         CreateDepthResources();
 
-        CreateTextureImage(TEXTURE_PATH);
+        /*CreateTextureImage(testTexture, "textures/case/case_BaseColor.tga.png");
+        CreateTextureImage(metallic, "textures/case/case_Metalness.tga.png");
+        CreateTextureImage(roughness, "textures/case/case_Roughness.tga.png");
+        CreateTextureImage(ao, "textures/case/case_ao.tga.png");*/
+        CreateTextureImage(testTexture, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");
+        CreateTextureImage(metallic, "textures/chair/morrisChair_bigChairMat_Metallic.tga.png");
+        CreateTextureImage(roughness, "textures/chair/morrisChair_bigChairMat_Roughness.tga.png");
+        CreateTextureImage(ao, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");
 
         CreateDescriptorPool();
-        testMaterial.Create(&shaderPipeline, descriptorPool, coreReferences, uniformBuffers, testTexture);
+        testMaterial.Create(&shaderPipeline, descriptorPool, coreReferences, uniformBuffers, testTexture, metallic, roughness, ao);
     }
 
     void UpdateUniformBuffer(uint32_t currFrame) {
@@ -884,14 +894,14 @@ private:
 
         UniformBufferObject ubo = {
             .off = time,
-            .model = glm::rotate(mat4(1.0f), -glm::radians(45.0f), vec3(1.0f,0.0f,0.0f)) * glm::rotate(mat4(1.0f), time, vec3(0.0f, 0.0f, 1.0f)),
-            .view = glm::lookAt(vec3(0,0,5), vec3(0), vec3(0,1,0)),
-            .proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f), // TODO: increase far
+            .model = glm::scale(mat4(1.0f), vec3(0.014f)) * glm::rotate(mat4(1.0f), time, vec3(0.0f, 1.0f, 0.0f)),
+            .view = glm::lookAt(vec3(0,2,5), vec3(0), vec3(0,1,0)),
+            .proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 1000.0f), // TODO: increase far
         };
-        /*ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+       /* ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
-     */   // glm::perspective outputs flipped y clip space, compensate
+        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);*/
+        // glm::perspective outputs flipped y clip space, compensate
         ubo.proj[1][1] *= -1.0f;
 
         memcpy(uniformBuffers[currFrame].mappedMemory, &ubo, sizeof(ubo));

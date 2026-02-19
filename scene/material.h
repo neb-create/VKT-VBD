@@ -10,10 +10,10 @@ using namespace glm;
 
 class Material {
 public:
-	void Create(const ShaderPipeline*, const vk::DescriptorPool&, const VulkanReferences&, const vector<WBuffer>& uniformBuffers, WTexture& testTexture);
+	void Create(const ShaderPipeline*, const vk::DescriptorPool&, const VulkanReferences&, const vector<WBuffer>& uniformBuffers, WTexture&, WTexture&, WTexture&, WTexture&);
 	vector<vk::raii::DescriptorSet> descriptorSets;
 private:
-	void CreateDescriptorSets(const vk::DescriptorPool& descriptorPool, const VulkanReferences& ref, const vector<WBuffer>& uniformBuffers, WTexture& testTexture);
+	void CreateDescriptorSets(const vk::DescriptorPool& descriptorPool, const VulkanReferences& ref, const vector<WBuffer>& uniformBuffers, WTexture&, WTexture&, WTexture&, WTexture&);
 
 	const ShaderPipeline* pipeline;
 };

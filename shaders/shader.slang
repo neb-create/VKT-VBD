@@ -24,7 +24,11 @@ struct VSOutput {
 [shader("vertex")]
 VSOutput vertMain(VSInput vIn) { //uint vid : SV_VertexID) {
     VSOutput vOut;
-    float4 worldPos = mul(ubo.model, float4(vIn.position, 1.0));
+    float3 objPos = vIn.position;
+    if (objPos.z > 80.) {
+        objPos.z += 15000.;
+    }
+    float4 worldPos = mul(ubo.model, float4(objPos, 1.0));
     vOut.worldPos = worldPos.xyz;
     vOut.position = mul(ubo.proj, mul(ubo.view, worldPos));
     vOut.color = vIn.color;
@@ -34,16 +38,19 @@ VSOutput vertMain(VSInput vIn) { //uint vid : SV_VertexID) {
 }
 
 Sampler2D texSampler;
+Sampler2D metallicSampler;
+Sampler2D roughnessSampler;
+Sampler2D aoSampler;
 
 static float3 light_pos[4] = float3[](float3(-10, 10, 10),
                                       float3(10, 10, 10),
                                       float3(-10, -10, 10),
                                       float3(10, -10, 10));
 
-static float3 light_col[4] = float3[](float3(300.f, 300.f, 300.f),
-                                      float3(300.f, 300.f, 300.f),
-                                      float3(300.f, 300.f, 300.f),
-                                      float3(300.f, 300.f, 300.f));
+static float3 light_col[4] = float3[](float3(300.f, 300.f, 900.f),
+                                      float3(300.f, 900.f, 300.f),
+                                      float3(900.f, 300.f, 300.f),
+                                      float3(300.f, 300.f, 900.f));
 
 static float PI = 3.14159f;
 static float INVPI = 0.31830988618;
@@ -78,6 +85,10 @@ float3 gammaCorrect(float3 col) {
     return pow(col, float3(1. / 2.2));
 }
 
+float3 textureGammaCorrect(float3 texColor) {
+    return pow(texColor, float3(2.2));
+}
+
 [shader("fragment")]
 float4 fragMain(VSOutput o) : SV_Target
 {
@@ -88,10 +99,10 @@ float4 fragMain(VSOutput o) : SV_Target
     //float3 color = o.color;
     //return texSampler.Sample(o.uv);//float4(o.uv.x, o.uv.y, 0.0, 1.0);
 
-    const float3 albedo = float3(0.5,0.5,0.5);
-    const float metallic = 0.5;
-    const float roughness = 0.2;
-    const float ambientOcclusion = 0.;
+    const float3 albedo = textureGammaCorrect(texSampler.Sample(o.uv).rgb); // float3(1.0,0.,0.);
+    const float metallic = metallicSampler.Sample(o.uv).r;                  // 1.0; // 0.5
+    const float roughness = roughnessSampler.Sample(o.uv).r;                // 0.1;
+    const float ambientOcclusion = 0.;//aoSampler.Sample(o.uv).r;//0.;
 
     float3 Lo = float3(0.);
     Lo += 0.03 * ambientOcclusion * albedo; // Ambient Light
