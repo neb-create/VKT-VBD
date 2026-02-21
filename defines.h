@@ -33,3 +33,13 @@ struct VulkanReferences {
 };
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2; // Shouldn't be too many, don't want GPU to fall behind CPU
+
+// UPTR
+#include <memory>
+
+#define uPtr std::unique_ptr
+#define mkU std::make_unique
+
+#define dict unordered_map
+
+typedef unsigned int uint;

@@ -21,9 +21,9 @@ using namespace std;
     return shaderModule;
 }
 
-void ShaderPipeline::Create(const VulkanReferences& ref, const string& path, const vk::Format* colorFormats, const vk::Format& depthFormat) {
+void ShaderPipeline::Create(const VulkanReferences& ref, const string& path, const vk::Format* colorFormats, const vk::Format& depthFormat, const vector<ShaderParameter::SParameter>& parameters) {
     // Create our shader uniforms/descriptor set layouts
-    CreateDescriptorSetLayout(ref);
+    CreateDescriptorSetLayout(ref, parameters);
 
     // Do programmable stages; Vertex, Fragment
     // Then fixed-function parameter setup for blending mode, viewport, rasterization
@@ -188,59 +188,73 @@ void ShaderPipeline::Create(const VulkanReferences& ref, const string& path, con
 
 }
 
-// TODO: get that create binding layout system i did in webgpu, cuz rn it's just hardcoded, make it take in shaderparams vecctor
-void ShaderPipeline::CreateDescriptorSetLayout(const VulkanReferences& ref) {
+void ShaderPipeline::CreateDescriptorSetLayout(const VulkanReferences& ref, const vector<ShaderParameter::SParameter>& parameters) {
     // Layout of descriptor set (sorta pointers to uniforms)
-    array bindings = {
-        vk::DescriptorSetLayoutBinding(
-            0, // Binding index used in shader
-            vk::DescriptorType::eUniformBuffer, // Type 
-            1, // How many objects?
-            vk::ShaderStageFlagBits::eAllGraphics, // Where can we reference 
-            nullptr), // Image sampling (later)
+    //array bindings = {
+    //    vk::DescriptorSetLayoutBinding(
+    //        0, // Binding index used in shader
+    //        vk::DescriptorType::eUniformBuffer, // Type 
+    //        1, // How many objects?
+    //        vk::ShaderStageFlagBits::eAllGraphics, // Where can we reference 
+    //        nullptr), // Image sampling (later)
 
-        vk::DescriptorSetLayoutBinding(
-            1,
-            vk::DescriptorType::eCombinedImageSampler,
-            1,
-            vk::ShaderStageFlagBits::eFragment,
-            nullptr),
-        vk::DescriptorSetLayoutBinding(
-            2,
-            vk::DescriptorType::eCombinedImageSampler,
-            1,
-            vk::ShaderStageFlagBits::eFragment,
-            nullptr),
-        vk::DescriptorSetLayoutBinding(
-            3,
-            vk::DescriptorType::eCombinedImageSampler,
-            1,
-            vk::ShaderStageFlagBits::eFragment,
-            nullptr),
-        vk::DescriptorSetLayoutBinding(
-            4,
-            vk::DescriptorType::eCombinedImageSampler,
-            1,
-            vk::ShaderStageFlagBits::eFragment,
-            nullptr),
+    //    vk::DescriptorSetLayoutBinding(
+    //        1,
+    //        vk::DescriptorType::eCombinedImageSampler,
+    //        1,
+    //        vk::ShaderStageFlagBits::eFragment,
+    //        nullptr),
+    //    vk::DescriptorSetLayoutBinding(
+    //        2,
+    //        vk::DescriptorType::eCombinedImageSampler,
+    //        1,
+    //        vk::ShaderStageFlagBits::eFragment,
+    //        nullptr),
+    //    vk::DescriptorSetLayoutBinding(
+    //        3,
+    //        vk::DescriptorType::eCombinedImageSampler,
+    //        1,
+    //        vk::ShaderStageFlagBits::eFragment,
+    //        nullptr),
+    //    vk::DescriptorSetLayoutBinding(
+    //        4,
+    //        vk::DescriptorType::eCombinedImageSampler,
+    //        1,
+    //        vk::ShaderStageFlagBits::eFragment,
+    //        nullptr),
 
-        vk::DescriptorSetLayoutBinding(
-            5,
-            vk::DescriptorType::eStorageBuffer,
-            1,
-            vk::ShaderStageFlagBits::eFragment,
-            nullptr),
-        vk::DescriptorSetLayoutBinding(
-            6,
-            vk::DescriptorType::eStorageBuffer,
-            1,
-            vk::ShaderStageFlagBits::eFragment,
-            nullptr),
-    };
+    //    vk::DescriptorSetLayoutBinding(
+    //        5,
+    //        vk::DescriptorType::eStorageBuffer,
+    //        1,
+    //        vk::ShaderStageFlagBits::eFragment,
+    //        nullptr),
+    //    vk::DescriptorSetLayoutBinding(
+    //        6,
+    //        vk::DescriptorType::eStorageBuffer,
+    //        1,
+    //        vk::ShaderStageFlagBits::eFragment,
+    //        nullptr),
+    //};
+
+    vector<vk::DescriptorSetLayoutBinding> bindingLayouts;
+    for (int i = 0; i < parameters.size(); i++) {
+        vk::DescriptorType dType;
+        const auto& param = parameters[i];
+        switch (param.type) {
+        case ShaderParameter::Type::UNIFORM:
+            dType = vk::DescriptorType::eUniformBuffer; break;
+        case ShaderParameter::Type::SAMPLER:
+            dType = vk::DescriptorType::eCombinedImageSampler;  break;
+        case ShaderParameter::Type::BUFFER:
+            dType = vk::DescriptorType::eStorageBuffer; break;
+        }
+        bindingLayouts.emplace_back(i, dType, 1, param.visibility);
+    }
 
     vk::DescriptorSetLayoutCreateInfo layoutInfo = {
-        .bindingCount = bindings.size(),
-        .pBindings = bindings.data()
+        .bindingCount = static_cast<uint32_t>(bindingLayouts.size()),
+        .pBindings = bindingLayouts.data()
     };
     descriptorSetLayout = vk::raii::DescriptorSetLayout(ref.device, layoutInfo);
 }

@@ -15,6 +15,7 @@
 #include "scene/mesh.h"
 #include "scene/pipeline.h"
 #include "scene/material.h"
+#include "scene/shader-parameter.h"
 
 using namespace std;
 using namespace vk::raii;
@@ -866,7 +867,16 @@ private:
         CreateSwapchain();
         CreateImageViews();
 
-        shaderPipeline.Create(coreReferences, "shaders/slang.spv", &swapSurfaceFormat.format, GetDepthFormat());
+        vector shaderParams = {
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{ .type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+        };
+        shaderPipeline.Create(coreReferences, "shaders/slang.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
 
         CreateCommandPool();
         CreateCommandBuffers();
@@ -890,8 +900,18 @@ private:
         CreateTextureImage(ao, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");
 
         CreateDescriptorPool();
-        array<WBuffer*, 2> bs = { &vertexBuffer, &indexBuffer };
-        testMaterial.Create(&shaderPipeline, descriptorPool, coreReferences, uniformBuffers, testTexture, metallic, roughness, ao, bs);
+        
+
+        vector materialParams = {
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testTexture}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &vertexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &indexBuffer}),
+        };
+        testMaterial.Create(&shaderPipeline, descriptorPool, coreReferences, materialParams);
     }
 
     void UpdateUniformBuffer(uint32_t currFrame) {
