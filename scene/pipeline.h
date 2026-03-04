@@ -24,8 +24,8 @@ protected:
 class ShaderPipeline : public WPipeline {
 public:
     void Create(const VulkanReferences& ref, const string& path, const vk::Format* colorFormats, const vk::Format& depthFormat, const vector<ShaderParameter::SParameter>& parameters);
-    void Bind(const vk::raii::CommandBuffer& cmd);
-    void BindDescriptorSets(const vk::raii::CommandBuffer& cmd, const vk::raii::DescriptorSet& descriptorSet); // Link bindings to our binding layout (WebGPU terminology)
+    void Bind(const vk::raii::CommandBuffer& cmd) const;
+    void BindDescriptorSets(const vk::raii::CommandBuffer& cmd, const vk::raii::DescriptorSet& descriptorSet) const; // Link bindings to our binding layout (WebGPU terminology)
     
 };
 
@@ -37,7 +37,7 @@ public:
 
 private:
     // Full definition required for member variables that aren't uPtrs since size needs to be known
-    uPtr<Material> computeMaterial = nullptr;
+    uPtr<Material> computeMaterial = nullptr; // TODO DECOUPLE, basically just do same setup as shader material, idk if i need to make child computematerial class, dont do it if dont need to?
     uvec3 workGroupSize;
 
     bool isCreated = false;

@@ -215,10 +215,10 @@ void WPipeline::CreateDescriptorSetLayout(const VulkanReferences& ref, const vec
     descriptorSetLayout = vk::raii::DescriptorSetLayout(ref.device, layoutInfo);
 }
 
-void ShaderPipeline::Bind(const vk::raii::CommandBuffer& cmd) {
+void ShaderPipeline::Bind(const vk::raii::CommandBuffer& cmd) const {
     cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 }
-void ShaderPipeline::BindDescriptorSets(const vk::raii::CommandBuffer& cmd, const vk::raii::DescriptorSet& descriptorSet) {
+void ShaderPipeline::BindDescriptorSets(const vk::raii::CommandBuffer& cmd, const vk::raii::DescriptorSet& descriptorSet) const {
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *descriptorSet, nullptr);
 }
 

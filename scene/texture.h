@@ -28,11 +28,20 @@ public:
 
     void CopyFromBuffer(const VulkanReferences& ref, const WBuffer& buffer, vk::DeviceSize bufferOffset = 0, uint32_t arrayLayer = 0);
     void TransitionImageLayoutHardcoded(const VulkanReferences& ref, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
+    static void TransitionImageLayout(
+        vk::raii::CommandBuffer& commandBuffer,
+        vk::Image image,
+        vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+        vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask,
+        vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask,
+        vk::ImageAspectFlags imageAspectFlags
+    );
     void CreateSampler(const VulkanReferences& ref);
 
     Image image = nullptr;
     DeviceMemory memory = nullptr;
     ImageView view = nullptr;
+    uint32_t width, height;
 
     inline const Sampler& GetSampler() {
         assert(hasSampler);
@@ -42,7 +51,6 @@ private:
     void CreateImageView(const VulkanReferences& ref, vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor);
     void CreateCubeMapImageView(const VulkanReferences& ref, vk::ImageAspectFlags aspectFlags = vk::ImageAspectFlagBits::eColor);
 
-    uint32_t width, height;
     uint32_t arrayLayerCount;
     vk::Format format;
 

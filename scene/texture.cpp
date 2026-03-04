@@ -168,6 +168,45 @@ void WTexture::CopyFromBuffer(const VulkanReferences& ref, const WBuffer& buffer
     SubmitOneTimeCommands(ref, &cmd);
 }
 
+// images can be in different layouts at different times
+// depending on what we're using the img for
+// presenting has a diff layout than rendering (for optimization sake)
+void WTexture::TransitionImageLayout(
+    vk::raii::CommandBuffer& commandBuffer,
+    vk::Image image,
+
+    vk::ImageLayout oldLayout,
+    vk::ImageLayout newLayout,
+    vk::AccessFlags2 srcAccessMask,
+    vk::AccessFlags2 dstAccessMask,
+    vk::PipelineStageFlags2 srcStageMask,
+    vk::PipelineStageFlags2 dstStageMask,
+
+    vk::ImageAspectFlags imageAspectFlags
+) {
+    vk::ImageMemoryBarrier2 barrier = {
+        .srcStageMask = srcStageMask,
+        .srcAccessMask = srcAccessMask,
+        .dstStageMask = dstStageMask,
+        .dstAccessMask = dstAccessMask,
+        .oldLayout = oldLayout,
+        .newLayout = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = {
+            .aspectMask = imageAspectFlags,
+            .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
+        }
+    };
+    vk::DependencyInfo dependencyInfo = {
+        .dependencyFlags = {},
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier
+    };
+    commandBuffer.pipelineBarrier2(dependencyInfo);
+}
+
 // Hardcoded src, dst access mask as well as src, dst stage (src is what must be done before barrier, and barrier must be done before dst)
 // TODO: ASSUMING COLOR BAD FOR DEPTH TEX
 void WTexture::TransitionImageLayoutHardcoded(const VulkanReferences& ref, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
@@ -249,7 +288,7 @@ void WTexture::CreateImageView(const VulkanReferences& ref, vk::ImageAspectFlags
         .image = image,
         .viewType = vk::ImageViewType::e2D,
         .format = format,
-        .subresourceRange = { aspectFlags, 0, 1, 0, 1 }
+        .subresourceRange = { .aspectMask = aspectFlags, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 }
     };
     view = ImageView(ref.device, viewInfo);
 }

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "defines.h"
+#include "scene/buffer.h"
 
 using namespace glm;
+using namespace std;
 
 struct Vertex {
     alignas(16) vec3 pos;
@@ -40,3 +42,24 @@ namespace std {
         }
     };
 }
+
+// Staging allows us to use high performance memory for loading vertex data
+// In practice, not good to do a separate allocation for every object, better to do one big one and split it up (VulkanMemoryAllocator library)
+// You should even go a step further, allocate a single vertex and index buffer for lots of things and use offsets to bindvertexbuffers to store lots of 3D objects
+class Mesh {
+public:
+    void CreateFromFile(const VulkanReferences&, const std::string& path, bool isStorageBuffer = false);
+
+    WBuffer vertexBuffer;
+    WBuffer indexBuffer;
+    uint32_t indexCount;
+
+private:
+    void CreateBuffers(const VulkanReferences&);
+    void LoadModel(const std::string& path);
+
+    vector<Vertex> vertices;
+    vector<uint32_t> indices;
+
+    bool isStorageBuffer;
+};

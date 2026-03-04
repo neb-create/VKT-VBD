@@ -85,11 +85,13 @@ private:
     bool frameBufferResized = false;
 
     //
-    vector<Vertex> vertices;
+    /*vector<Vertex> vertices;
     vector<uint32_t> indices;
 
     WBuffer vertexBuffer;
-    WBuffer indexBuffer;
+    WBuffer indexBuffer;*/
+
+    Mesh blobMesh;
 
     vector<WBuffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
 
@@ -491,51 +493,12 @@ private:
         commandBuffers = vk::raii::CommandBuffers(coreReferences.device, allocateInfo);
     }
 
-    // images can be in different layouts at different times
-    // depending on what we're using the img for
-    // presenting has a diff layout than rendering (for optimization sake)
-    void TransitionImageLayout(
-        vk::raii::CommandBuffer& commandBuffer,
-        vk::Image image,
-
-        vk::ImageLayout oldLayout,
-        vk::ImageLayout newLayout,
-        vk::AccessFlags2 srcAccessMask,
-        vk::AccessFlags2 dstAccessMask,
-        vk::PipelineStageFlags2 srcStageMask,
-        vk::PipelineStageFlags2 dstStageMask,
-
-        vk::ImageAspectFlags imageAspectFlags
-    ) {
-        vk::ImageMemoryBarrier2 barrier = {
-            .srcStageMask = srcStageMask,
-            .srcAccessMask = srcAccessMask,
-            .dstStageMask = dstStageMask,
-            .dstAccessMask = dstAccessMask,
-            .oldLayout = oldLayout,
-            .newLayout = newLayout,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = image,
-            .subresourceRange = {
-                .aspectMask = imageAspectFlags,
-                .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1
-            }
-        };
-        vk::DependencyInfo dependencyInfo = {
-            .dependencyFlags = {},
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrier
-        };
-        commandBuffer.pipelineBarrier2(dependencyInfo);
-    }
-
     void RecordCommandBuffer(vk::raii::CommandBuffer& commandBuffer, uint32_t imageIndex, uint32_t frameIndex) {
         // if cmd buffer already was recorded, beginning will reset it.  we can't append once we record a cmd buffer, only reset
         commandBuffer.begin({}); // could put flags in here
 
         // Transition to COLOR ATTACHMENT OPTIMAL
-        TransitionImageLayout(
+        WTexture::TransitionImageLayout(
             commandBuffer,
             swapChainImages[imageIndex],
             vk::ImageLayout::eUndefined, // From any?
@@ -547,7 +510,7 @@ private:
             vk::ImageAspectFlagBits::eColor);
 
         // Transition the depth image to its optimal (from whatever it was we dont care)
-        TransitionImageLayout(
+        WTexture::TransitionImageLayout(
             commandBuffer,
             *depthTexture.image,
             vk::ImageLayout::eUndefined,
@@ -595,8 +558,8 @@ private:
 
         // Bind GraphGraphics Pipeline and Geo Data
         shaderPipeline.Bind(commandBuffer);
-        commandBuffer.bindVertexBuffers(0, *(vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
-        commandBuffer.bindIndexBuffer(*(indexBuffer.buffer), 0, vk::IndexType::eUint32);
+        commandBuffer.bindVertexBuffers(0, *(blobMesh.vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
+        commandBuffer.bindIndexBuffer(*(blobMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
 
         // remember in the pipeline we specified viewport and scissor state as dynamic, so we gotta specify them now
         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
@@ -604,13 +567,13 @@ private:
 
         shaderPipeline.BindDescriptorSets(commandBuffer, testMaterial.descriptorSets[frameIndex]);
         // IndexCount, InstanceCount, IndexBufferOffset, VertexBufferOffset, InstanceOffset
-        commandBuffer.drawIndexed(indices.size(), 1, 0, 0, 0);
+        commandBuffer.drawIndexed(blobMesh.indexCount, 1, 0, 0, 0);
 
         commandBuffer.endRendering();
         // END RENDER
 
         // Have to transition image layout to presentable format
-        TransitionImageLayout(
+        WTexture::TransitionImageLayout(
             commandBuffer,
             swapChainImages[imageIndex],
             vk::ImageLayout::eColorAttachmentOptimal,
@@ -668,47 +631,47 @@ private:
         CreateDepthResources();
     }
 
-    void CreateVertexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(Vertex) * vertices.size();
+    //void CreateVertexBuffer() {
+    //    vk::DeviceSize bufferSize = sizeof(Vertex) * vertices.size();
 
-        WBuffer stagingBuffer;
-        stagingBuffer.Create(coreReferences, bufferSize,
-            vk::BufferUsageFlagBits::eTransferSrc, // Can be source of a transfer
-            vk::MemoryPropertyFlagBits::eHostVisible |
-            vk::MemoryPropertyFlagBits::eHostCoherent); // Continue converting everything into using buffer object, then create a references class filled with POINTERS to important info with static Ins
+    //    WBuffer stagingBuffer;
+    //    stagingBuffer.Create(coreReferences, bufferSize,
+    //        vk::BufferUsageFlagBits::eTransferSrc, // Can be source of a transfer
+    //        vk::MemoryPropertyFlagBits::eHostVisible |
+    //        vk::MemoryPropertyFlagBits::eHostCoherent); // Continue converting everything into using buffer object, then create a references class filled with POINTERS to important info with static Ins
 
-        // Fill Vertex Buffer w Data
-        stagingBuffer.MapMemory(); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
-        memcpy(stagingBuffer.mappedMemory, vertices.data(), bufferSize);
-        stagingBuffer.UnmapMemory();
+    //    // Fill Vertex Buffer w Data
+    //    stagingBuffer.MapMemory(); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
+    //    memcpy(stagingBuffer.mappedMemory, vertices.data(), bufferSize);
+    //    stagingBuffer.UnmapMemory();
 
-        vertexBuffer.Create(coreReferences, bufferSize,
-            vk::BufferUsageFlagBits::eVertexBuffer |
-            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eDeviceLocal // Device local, can't map memory directly
-        );
+    //    vertexBuffer.Create(coreReferences, bufferSize,
+    //        vk::BufferUsageFlagBits::eVertexBuffer |
+    //        vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+    //        vk::MemoryPropertyFlagBits::eDeviceLocal // Device local, can't map memory directly
+    //    );
 
-        vertexBuffer.CopyFrom(coreReferences, stagingBuffer);
-        // Staging buffer will be cleaned up RAII
-        // Staging allows us to use high performance memory for loading vertex data
-        // In practice, not good to do a separate allocation for every object, better to do one big one and split it up (VulkanMemoryAllocator library)
-        // You should even go a step further, allocate a single vertex and index buffer for lots of things and use offsets to bindvertexbuffers to store lots of 3D objects
-    }
+    //    vertexBuffer.CopyFrom(coreReferences, stagingBuffer);
+    //    // Staging buffer will be cleaned up RAII
+    //    // Staging allows us to use high performance memory for loading vertex data
+    //    // In practice, not good to do a separate allocation for every object, better to do one big one and split it up (VulkanMemoryAllocator library)
+    //    // You should even go a step further, allocate a single vertex and index buffer for lots of things and use offsets to bindvertexbuffers to store lots of 3D objects
+    //}
 
-    void CreateIndexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-        std::cout << "\t" << indices.size() << std::endl;
+    //void CreateIndexBuffer() {
+    //    vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+    //    std::cout << "\t" << indices.size() << std::endl;
 
-        WBuffer stagingBuffer;
-        stagingBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-        stagingBuffer.MapMemory();
-        memcpy(stagingBuffer.mappedMemory, indices.data(), bufferSize);
-        stagingBuffer.UnmapMemory();
+    //    WBuffer stagingBuffer;
+    //    stagingBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    //    stagingBuffer.MapMemory();
+    //    memcpy(stagingBuffer.mappedMemory, indices.data(), bufferSize);
+    //    stagingBuffer.UnmapMemory();
 
-        indexBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    //    indexBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        indexBuffer.CopyFrom(coreReferences, stagingBuffer);
-    }
+    //    indexBuffer.CopyFrom(coreReferences, stagingBuffer);
+    //}
 
     void CreateUniformBuffers() {
         uniformBuffers.clear(); // In case this is used as 'recreate'
@@ -788,49 +751,49 @@ private:
             vk::ImageAspectFlagBits::eDepth);
     }
 
-    void LoadModel(const std::string& path) {
-        tinyobj::attrib_t attrib; // all vert attribs
-        vector<tinyobj::shape_t> shapes; // all separate objects and their faces
-        vector<tinyobj::material_t> materials; // material/texture per face (that we'll ignore)
-        string err;
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &err, path.c_str())) {
-            throw std::runtime_error(err);
-        }
-        // LoadObj will auto triangulate n-gons into triangles by default
+    //void LoadModel(const std::string& path) {
+    //    tinyobj::attrib_t attrib; // all vert attribs
+    //    vector<tinyobj::shape_t> shapes; // all separate objects and their faces
+    //    vector<tinyobj::material_t> materials; // material/texture per face (that we'll ignore)
+    //    string err;
+    //    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &err, path.c_str())) {
+    //        throw std::runtime_error(err);
+    //    }
+    //    // LoadObj will auto triangulate n-gons into triangles by default
 
-        // uniqueVerts[v] = Index of v in vertex buffer if exists
-        std::unordered_map<Vertex, uint32_t> uniqueVerts;
+    //    // uniqueVerts[v] = Index of v in vertex buffer if exists
+    //    std::unordered_map<Vertex, uint32_t> uniqueVerts;
 
-        for (const auto& shape : shapes) {
-            for (const auto& index : shape.mesh.indices) {
-                Vertex vertex = {
-                    .pos = vec3(
-                        attrib.vertices[3 * index.vertex_index + 0],
-                        attrib.vertices[3 * index.vertex_index + 1],
-                        attrib.vertices[3 * index.vertex_index + 2]
-                    ),
-                    .color = vec3(1.0f),
-                    .uv = vec2(
-                        attrib.texcoords[2 * index.texcoord_index + 0],
-                        1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                    ),
-                    .norm = vec3(
-                        attrib.normals[3 * index.normal_index + 0],
-                        attrib.normals[3 * index.normal_index + 1],
-                        attrib.normals[3 * index.normal_index + 2]
-                    ),
-                };
+    //    for (const auto& shape : shapes) {
+    //        for (const auto& index : shape.mesh.indices) {
+    //            Vertex vertex = {
+    //                .pos = vec3(
+    //                    attrib.vertices[3 * index.vertex_index + 0],
+    //                    attrib.vertices[3 * index.vertex_index + 1],
+    //                    attrib.vertices[3 * index.vertex_index + 2]
+    //                ),
+    //                .color = vec3(1.0f),
+    //                .uv = vec2(
+    //                    attrib.texcoords[2 * index.texcoord_index + 0],
+    //                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+    //                ),
+    //                .norm = vec3(
+    //                    attrib.normals[3 * index.normal_index + 0],
+    //                    attrib.normals[3 * index.normal_index + 1],
+    //                    attrib.normals[3 * index.normal_index + 2]
+    //                ),
+    //            };
 
-                // Create vertex if doesn't exist
-                if (uniqueVerts.count(vertex) == 0) {
-                    vertices.push_back(vertex);
-                    uniqueVerts[vertex] = vertices.size() - 1;
-                }
+    //            // Create vertex if doesn't exist
+    //            if (uniqueVerts.count(vertex) == 0) {
+    //                vertices.push_back(vertex);
+    //                uniqueVerts[vertex] = vertices.size() - 1;
+    //            }
 
-                indices.push_back(uniqueVerts[vertex]);
-            }
-        }
-    }
+    //            indices.push_back(uniqueVerts[vertex]);
+    //        }
+    //    }
+    //}
 
     void testCompute() {
         uint32_t size = 551;
@@ -930,9 +893,7 @@ private:
 
         CreateSyncObjects();
 
-        LoadModel("models/blob.obj");// two - case-MONEY_triang - LP.obj");// MODEL_PATH);
-        CreateVertexBuffer();
-        CreateIndexBuffer();
+        blobMesh.CreateFromFile(coreReferences, "models/blob.obj", true);
         CreateUniformBuffers();
 
         CreateDepthResources();
@@ -971,8 +932,8 @@ private:
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &vertexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &indexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &blobMesh.vertexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &blobMesh.indexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients})
         };
