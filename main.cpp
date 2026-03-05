@@ -58,7 +58,7 @@ private:
     // Queue graphicsQueue = nullptr;
     vector<const char*> desiredDeviceExtensions = {
         vk::KHRSwapchainExtensionName,
-        // ATOMIC vk::EXTShaderAtomicFloatExtensionName,
+        vk::EXTShaderAtomicFloatExtensionName, // ATOMIC
         vk::KHRComputeShaderDerivativesExtensionName
     };
 
@@ -263,7 +263,7 @@ private:
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
-            // ATOMIC features.template get<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>().shaderBufferFloat32AtomicAdd &&
+            features.template get<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>().shaderBufferFloat32AtomicAdd && // ATOMIC 
             features.template get<vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR>().computeDerivativeGroupQuads;
 
         return isSuitable;
@@ -329,7 +329,7 @@ private:
             vk::PhysicalDeviceVulkan11Features, // B
             vk::PhysicalDeviceVulkan13Features, // C 
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, // D
-            // ATOMIC vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT,
+            vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT, // ATOMIC 
             vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR
         >
             featureChain = {
@@ -337,7 +337,7 @@ private:
                 {.shaderDrawParameters = true}, // B
                 {.synchronization2 = true, .dynamicRendering = true}, // constructor for C, dynamic rendering is a modern simplification
                 {.extendedDynamicState = true},
-                // ATOMIC {.shaderBufferFloat32AtomicAdd = true},
+                {.shaderBufferFloat32AtomicAdd = true}, // ATOMIC 
                 {.computeDerivativeGroupQuads = true}
         };
 
@@ -635,48 +635,6 @@ private:
         CreateDepthResources();
     }
 
-    //void CreateVertexBuffer() {
-    //    vk::DeviceSize bufferSize = sizeof(Vertex) * vertices.size();
-
-    //    WBuffer stagingBuffer;
-    //    stagingBuffer.Create(coreReferences, bufferSize,
-    //        vk::BufferUsageFlagBits::eTransferSrc, // Can be source of a transfer
-    //        vk::MemoryPropertyFlagBits::eHostVisible |
-    //        vk::MemoryPropertyFlagBits::eHostCoherent); // Continue converting everything into using buffer object, then create a references class filled with POINTERS to important info with static Ins
-
-    //    // Fill Vertex Buffer w Data
-    //    stagingBuffer.MapMemory(); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
-    //    memcpy(stagingBuffer.mappedMemory, vertices.data(), bufferSize);
-    //    stagingBuffer.UnmapMemory();
-
-    //    vertexBuffer.Create(coreReferences, bufferSize,
-    //        vk::BufferUsageFlagBits::eVertexBuffer |
-    //        vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-    //        vk::MemoryPropertyFlagBits::eDeviceLocal // Device local, can't map memory directly
-    //    );
-
-    //    vertexBuffer.CopyFrom(coreReferences, stagingBuffer);
-    //    // Staging buffer will be cleaned up RAII
-    //    // Staging allows us to use high performance memory for loading vertex data
-    //    // In practice, not good to do a separate allocation for every object, better to do one big one and split it up (VulkanMemoryAllocator library)
-    //    // You should even go a step further, allocate a single vertex and index buffer for lots of things and use offsets to bindvertexbuffers to store lots of 3D objects
-    //}
-
-    //void CreateIndexBuffer() {
-    //    vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-    //    std::cout << "\t" << indices.size() << std::endl;
-
-    //    WBuffer stagingBuffer;
-    //    stagingBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-    //    stagingBuffer.MapMemory();
-    //    memcpy(stagingBuffer.mappedMemory, indices.data(), bufferSize);
-    //    stagingBuffer.UnmapMemory();
-
-    //    indexBuffer.Create(coreReferences, bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-    //    indexBuffer.CopyFrom(coreReferences, stagingBuffer);
-    //}
-
     void CreateUniformBuffers() {
         uniformBuffers.clear(); // In case this is used as 'recreate'
 
@@ -754,50 +712,6 @@ private:
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             vk::ImageAspectFlagBits::eDepth);
     }
-
-    //void LoadModel(const std::string& path) {
-    //    tinyobj::attrib_t attrib; // all vert attribs
-    //    vector<tinyobj::shape_t> shapes; // all separate objects and their faces
-    //    vector<tinyobj::material_t> materials; // material/texture per face (that we'll ignore)
-    //    string err;
-    //    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &err, path.c_str())) {
-    //        throw std::runtime_error(err);
-    //    }
-    //    // LoadObj will auto triangulate n-gons into triangles by default
-
-    //    // uniqueVerts[v] = Index of v in vertex buffer if exists
-    //    std::unordered_map<Vertex, uint32_t> uniqueVerts;
-
-    //    for (const auto& shape : shapes) {
-    //        for (const auto& index : shape.mesh.indices) {
-    //            Vertex vertex = {
-    //                .pos = vec3(
-    //                    attrib.vertices[3 * index.vertex_index + 0],
-    //                    attrib.vertices[3 * index.vertex_index + 1],
-    //                    attrib.vertices[3 * index.vertex_index + 2]
-    //                ),
-    //                .color = vec3(1.0f),
-    //                .uv = vec2(
-    //                    attrib.texcoords[2 * index.texcoord_index + 0],
-    //                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-    //                ),
-    //                .norm = vec3(
-    //                    attrib.normals[3 * index.normal_index + 0],
-    //                    attrib.normals[3 * index.normal_index + 1],
-    //                    attrib.normals[3 * index.normal_index + 2]
-    //                ),
-    //            };
-
-    //            // Create vertex if doesn't exist
-    //            if (uniqueVerts.count(vertex) == 0) {
-    //                vertices.push_back(vertex);
-    //                uniqueVerts[vertex] = vertices.size() - 1;
-    //            }
-
-    //            indices.push_back(uniqueVerts[vertex]);
-    //        }
-    //    }
-    //}
 
     void testCompute() {
         uint32_t size = 551;
@@ -973,8 +887,8 @@ private:
             "textures/envmaps/storforsen/negy.jpg",
             "textures/envmaps/storforsen/posz.jpg",
             "textures/envmaps/storforsen/negz.jpg"
-            /*"textures/envmaps/stormydays/stormydays_rt.tga",
-            "textures/envmaps/stormydays/stormydays_lf.tga",
+            /*"textures/envmaps/stormydays/stormydays_lf.tga",
+            "textures/envmaps/stormydays/stormydays_rt.tga",
             "textures/envmaps/stormydays/stormydays_up.tga",
             "textures/envmaps/stormydays/stormydays_dn.tga",
             "textures/envmaps/stormydays/stormydays_ft.tga",
@@ -999,7 +913,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.vertexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.indexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &writtenToCubemap}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &writtenToCubemap}),// &testCubeMap }),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients})
         };
         testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
@@ -1020,9 +934,9 @@ private:
             .proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 1000.0f), // TODO: increase far
         };
         /*ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f) * 0.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = lookAt(glm::vec3(3.0f * cos(time), 3.0f * sin(time), 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);*/
-        // glm::perspective outputs flipped y clip space, compensate
+        ubo.view = lookAt(glm::vec3(4.0f * cos(time), 1.2f, 4.0f * sin(time)), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
+        */// glm::perspective outputs flipped y clip space, compensate
         ubo.proj[1][1] *= -1.0f;
 
         // TODO: how are we sure that the uniform buffer does get written to after this?  i think vulkan actually ensures the cpu data is same when mapped?

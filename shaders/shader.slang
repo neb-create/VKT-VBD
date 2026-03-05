@@ -217,17 +217,19 @@ float4 fragMain(FSInput o) : SV_Target
             }
         }
     }
+    float2 uv = o.uv;
     float3 hitCol;
     if (minDist < 10000.0) {
         // Hit object
+        uv = hitUv; // BAD
         hitCol = textureGammaCorrect(texSampler.Sample(hitUv).rgb);
     } else {
         hitCol = SampleSkybox(reflRay, skybox);
     }
 
-    const float3 albedo = textureGammaCorrect(texSampler.Sample(o.uv).rgb); // float3(1.0,0.,0.);
-    const float metallic = metallicSampler.Sample(o.uv).r; // 1.0; // 0.5
-    const float roughness = roughnessSampler.Sample(o.uv).r;                // 0.1;
+    const float3 albedo = float3(1.);//textureGammaCorrect(texSampler.Sample(uv).rgb); // float3(1.);// // float3(1.0,0.,0.);
+    const float metallic = metallicSampler.Sample(uv).r; // 1.0; // 0.5
+    const float roughness = roughnessSampler.Sample(uv).r;                // 0.1;
     const float ambientOcclusion = 0.;//aoSampler.Sample(o.uv).r;//0.;
 
     float3 Lo = float3(0.);
@@ -261,11 +263,12 @@ float4 fragMain(FSInput o) : SV_Target
         float3 kd = float3(1.0) - ks;
         kd *= 1.0 - metallic; // More metal less diffuse
 
-        Lo += fCookTorrance * Li * lambert; // Specular
-        Lo += kd * fLambert * Li * lambert; // Diffuse
+        // Lo += fCookTorrance * Li * lambert; // Specular
+        // Lo += kd * fLambert * Li * lambert; // Diffuse
     }
-    // Lo += albedo * INVPI * SampleSkybox(norm, skybox);//sampleSh(norm);
-    Lo = Lo *0.5 + 2.0 * hitCol;
+
+    Lo += SampleSkybox(norm, skybox);//albedo * INVPI * sampleSh(norm);
+    // Lo = Lo *0.5 + 2.0 * hitCol;
 
     float3 col = gammaCorrect(reinhardOp(Lo));
 
@@ -280,6 +283,6 @@ float4 fragMain(FSInput o) : SV_Target
     // val /= 5000.;
     // float v = shCoefficients[26]-64.*8.;
 
-    return float4(SampleSkybox(reflRay, skybox), 1.);
+    return float4(col, 1.);
 
 }

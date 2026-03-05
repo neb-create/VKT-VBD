@@ -4,7 +4,7 @@ module Raytracing;
 // right now environment is just skybox
 
 public float3 SampleSkybox(float3 rd, SamplerCube skybox) {
-    return pow(skybox.Sample(rd).rgb,float3(2.2));
+    return skybox.Sample(rd).rgb;//pow(skybox.Sample(rd).rgb,float3(2.2));
 }
 
 float3 SampleEnvironment(float3 ro, float3 rd) {
