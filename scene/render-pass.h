@@ -12,10 +12,10 @@ class WRenderPass {
 public:
 	void Create(const VulkanReferences&);
 
-	void Start(RenderTarget&, vk::raii::CommandBuffer* cmd);
+	void Start(RenderTarget*, vk::raii::CommandBuffer* cmd);
 	void EnqueueSetMaterial(const Material&);
 	void EnqueueDraw(const Mesh&);
-	void FinishExecute(bool waitForFinish = true);
+	void FinishExecute(vk::ImageLayout targetColorLayout, bool waitForFinish = true);
 
 private:
 	void WaitForFinish();

@@ -16,6 +16,8 @@
 #include "scene/pipeline.h"
 #include "scene/material.h"
 #include "scene/shader-parameter.h"
+#include "scene/render-pass.h"
+#include "scene/render-target.h"
 
 #include "lighting/gi-manager.h"
 
@@ -56,7 +58,7 @@ private:
     // Queue graphicsQueue = nullptr;
     vector<const char*> desiredDeviceExtensions = {
         vk::KHRSwapchainExtensionName,
-        vk::EXTShaderAtomicFloatExtensionName,
+        // ATOMIC vk::EXTShaderAtomicFloatExtensionName,
         vk::KHRComputeShaderDerivativesExtensionName
     };
 
@@ -92,10 +94,12 @@ private:
     WBuffer indexBuffer;*/
 
     Mesh blobMesh;
+    Mesh chairMesh;
 
     vector<WBuffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
 
     Material testMaterial;
+    Material afterMaterial;
 
     WTexture testTexture;
     WTexture metallic;
@@ -259,7 +263,7 @@ private:
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
-            features.template get<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>().shaderBufferFloat32AtomicAdd &&
+            // ATOMIC features.template get<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>().shaderBufferFloat32AtomicAdd &&
             features.template get<vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR>().computeDerivativeGroupQuads;
 
         return isSuitable;
@@ -325,7 +329,7 @@ private:
             vk::PhysicalDeviceVulkan11Features, // B
             vk::PhysicalDeviceVulkan13Features, // C 
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, // D
-            vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT,
+            // ATOMIC vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT,
             vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR
         >
             featureChain = {
@@ -333,7 +337,7 @@ private:
                 {.shaderDrawParameters = true}, // B
                 {.synchronization2 = true, .dynamicRendering = true}, // constructor for C, dynamic rendering is a modern simplification
                 {.extendedDynamicState = true},
-                {.shaderBufferFloat32AtomicAdd = true},
+                // ATOMIC {.shaderBufferFloat32AtomicAdd = true},
                 {.computeDerivativeGroupQuads = true}
         };
 
@@ -507,7 +511,7 @@ private:
             vk::AccessFlagBits2::eColorAttachmentWrite,
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::ImageAspectFlagBits::eColor);
+            vk::ImageAspectFlagBits::eColor, 1);
 
         // Transition the depth image to its optimal (from whatever it was we dont care)
         WTexture::TransitionImageLayout(
@@ -519,7 +523,7 @@ private:
             vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
             vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
             vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            vk::ImageAspectFlagBits::eDepth
+            vk::ImageAspectFlagBits::eDepth, 1
         );
 
         vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
@@ -558,8 +562,8 @@ private:
 
         // Bind GraphGraphics Pipeline and Geo Data
         shaderPipeline.Bind(commandBuffer);
-        commandBuffer.bindVertexBuffers(0, *(blobMesh.vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
-        commandBuffer.bindIndexBuffer(*(blobMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
+        commandBuffer.bindVertexBuffers(0, *(chairMesh.vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
+        commandBuffer.bindIndexBuffer(*(chairMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
 
         // remember in the pipeline we specified viewport and scissor state as dynamic, so we gotta specify them now
         commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
@@ -567,7 +571,7 @@ private:
 
         shaderPipeline.BindDescriptorSets(commandBuffer, testMaterial.descriptorSets[frameIndex]);
         // IndexCount, InstanceCount, IndexBufferOffset, VertexBufferOffset, InstanceOffset
-        commandBuffer.drawIndexed(blobMesh.indexCount, 1, 0, 0, 0);
+        commandBuffer.drawIndexed(chairMesh.indexCount, 1, 0, 0, 0);
 
         commandBuffer.endRendering();
         // END RENDER
@@ -582,7 +586,7 @@ private:
             {},
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             vk::PipelineStageFlagBits2::eBottomOfPipe,
-            vk::ImageAspectFlagBits::eColor);
+            vk::ImageAspectFlagBits::eColor, 1);
 
         commandBuffer.end();
 
@@ -689,9 +693,9 @@ private:
     void CreateDescriptorPool() {
         // Inadequate descriptor pools may not be caught by validation layers
         std::array poolSize = {
-            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 100*MAX_FRAMES_IN_FLIGHT),
+            vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 100 * MAX_FRAMES_IN_FLIGHT),
             vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 100 * MAX_FRAMES_IN_FLIGHT),
-            vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 5*MAX_FRAMES_IN_FLIGHT)
+            vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 5 * MAX_FRAMES_IN_FLIGHT)
         };
 
         // Pool Sizes denotes how many of each specific descriptor type we can allocate
@@ -700,7 +704,7 @@ private:
 
         vk::DescriptorPoolCreateInfo poolInfo = {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = MAX_FRAMES_IN_FLIGHT*100,
+            .maxSets = MAX_FRAMES_IN_FLIGHT * 100,
 
             .poolSizeCount = poolSize.size(),
             .pPoolSizes = poolSize.data()
@@ -864,6 +868,65 @@ private:
         giManager->Test(&testCubeMap);
     }
 
+    WTexture writtenToCubemap;
+    void writeToCubemap() {
+
+        UpdateUniformBuffer(0); // jank
+        
+        writtenToCubemap.CreateCubeMapFromFiles(coreReferences, {
+            "textures/envmaps/storforsen/posx.jpg",
+            "textures/envmaps/storforsen/negx.jpg",
+            "textures/envmaps/storforsen/posy.jpg",
+            "textures/envmaps/storforsen/negy.jpg",
+            "textures/envmaps/storforsen/posz.jpg",
+            "textures/envmaps/storforsen/negz.jpg"
+            }, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal, 
+            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment, 
+            vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eColorAttachmentOptimal); // drawing transitions to color attachment everytime right now anyways, later can optimize using a render graph typ eof thing.
+
+        Material deferredMaterial;
+        vector materialParams = {
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testTexture}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.vertexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.indexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients})
+        };
+        deferredMaterial.Create(&shaderPipeline, coreReferences, materialParams);
+
+        vk::Format depthFormat = GetDepthFormat();
+        WTexture tempDepthTexture;
+        tempDepthTexture.Create(coreReferences,
+            writtenToCubemap.width, writtenToCubemap.height,
+            depthFormat,
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eDepthStencilAttachment,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            vk::ImageAspectFlagBits::eDepth);
+
+        // main shouldn't own it, i think the texture should own every possible image view or smth TODO, shouldn't be too many (but maybe too many when mips introduced, could just
+        // pass entire image view to rendertarget and the rendertarget owns it, could use uptr std move
+        ImageView colorView = writtenToCubemap.CreateImageView(coreReferences, 2);
+
+        RenderTarget target;
+        target.CreateFromTexture(&writtenToCubemap, &colorView, &tempDepthTexture, &tempDepthTexture.view);
+
+        WRenderPass pass;
+        pass.Create(coreReferences);
+
+        CommandBuffer cmd = BeginOneTimeCommands(coreReferences);
+        pass.Start(&target, &cmd);
+
+        pass.EnqueueSetMaterial(deferredMaterial);
+        pass.EnqueueDraw(chairMesh);
+        
+        pass.FinishExecute(vk::ImageLayout::eShaderReadOnlyOptimal);
+    }
+
     void InitVulkan() {
         CreateInstance();
         SetupDebugMessenger();
@@ -881,7 +944,7 @@ private:
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{ .type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
 
@@ -894,6 +957,7 @@ private:
         CreateSyncObjects();
 
         blobMesh.CreateFromFile(coreReferences, "models/blob.obj", true);
+        chairMesh.CreateFromFile(coreReferences, "models/morrisChair.obj", true);
         CreateUniformBuffers();
 
         CreateDepthResources();
@@ -923,8 +987,9 @@ private:
         CreateTextureImage(ao, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");*/
 
         CreateDescriptorPool();
-        
+
         testGI();
+        writeToCubemap();
 
         vector materialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
@@ -932,15 +997,15 @@ private:
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &blobMesh.vertexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &blobMesh.indexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.vertexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.indexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &writtenToCubemap}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients})
         };
         testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
 
         testCompute();
-        
+
     }
 
     void UpdateUniformBuffer(uint32_t currFrame) {
@@ -954,9 +1019,9 @@ private:
             .view = glm::lookAt(vec3(0,2,5), vec3(0), vec3(0,1,0)),
             .proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 1000.0f), // TODO: increase far
         };
-        ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f)*0.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = lookAt(glm::vec3(3.0f * cos(time), 3.0f*sin(time), 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
+        /*ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f) * 0.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = lookAt(glm::vec3(3.0f * cos(time), 3.0f * sin(time), 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);*/
         // glm::perspective outputs flipped y clip space, compensate
         ubo.proj[1][1] *= -1.0f;
 

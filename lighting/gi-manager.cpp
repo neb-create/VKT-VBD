@@ -19,33 +19,33 @@ void GIManager::GenerateSHCoefficients(WTexture* skybox) {
 	}
 	shCoefficients.CreateDeviceLocalFromData(*ref, byteSize, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, zeroData.data());
 
-	vector sParams = {
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute},
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute},
-	};
+	//vector sParams = { ATOMIC
+	//	ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute},
+	//	ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute},
+	//};
 
-	vector mParams = {
-		ShaderParameter::MParameter(ShaderParameter::USampler{.texture = skybox}),
-		ShaderParameter::MParameter(ShaderParameter::UBuffer{.buffer = &shCoefficients}),
-	};
+	//vector mParams = {
+	//	ShaderParameter::MParameter(ShaderParameter::USampler{.texture = skybox}),
+	//	ShaderParameter::MParameter(ShaderParameter::UBuffer{.buffer = &shCoefficients}),
+	//};
 
-	ComputePipeline generateShader; // need better shader name like sh generator lol
-	generateShader.Create(*ref, "shaders/spherical-harmonics.spv", sParams, mParams, uvec3(8, 8, 1));
+	//ComputePipeline generateShader; // need better shader name like sh generator lol
+	//generateShader.Create(*ref, "shaders/spherical-harmonics.spv", sParams, mParams, uvec3(8, 8, 1));
 
-	ComputeDispatcher dispatcher;
-	dispatcher.Create(*ref);
+	//ComputeDispatcher dispatcher;
+	//dispatcher.Create(*ref);
 
-	dispatcher.StartRecord(*ref);
-	generateShader.EnqueueDispatch(&dispatcher, uvec3(128, 128, 1));
-	dispatcher.FinishRecordSubmit(*ref);
+	//dispatcher.StartRecord(*ref);
+	//generateShader.EnqueueDispatch(&dispatcher, uvec3(128, 128, 1));
+	//dispatcher.FinishRecordSubmit(*ref);
 
-	WBuffer receiveBuffer;
-	receiveBuffer.Create(*ref, byteSize, vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	receiveBuffer.CopyFrom(*ref, shCoefficients, byteSize);
+	//WBuffer receiveBuffer;
+	//receiveBuffer.Create(*ref, byteSize, vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	//receiveBuffer.CopyFrom(*ref, shCoefficients, byteSize);
 
-	float* data = (float*)receiveBuffer.MapMemory();
-	for (int i = 0; i < 27; i++) {
-		std::cout << data[i] << std::endl;
-	}
-	receiveBuffer.UnmapMemory();
+	//float* data = (float*)receiveBuffer.MapMemory();
+	//for (int i = 0; i < 27; i++) {
+	//	std::cout << data[i] << std::endl;
+	//}
+	//receiveBuffer.UnmapMemory();
 }

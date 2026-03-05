@@ -2,6 +2,8 @@
 
 #include "defines.h"
 
+#include "scene/texture.h"
+
 class RenderTarget {
 public:
 	// no, delete: void CreateFromImages(vk::raii::Image* colorImg, vk::raii::ImageView* colorView, vk::raii::Image* depthImg, vk::raii::ImageView* depthView);
