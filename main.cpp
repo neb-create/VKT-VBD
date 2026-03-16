@@ -75,6 +75,9 @@ private:
     ShaderPipeline skyboxShader;
     Material skyboxMaterial;
 
+    ShaderPipeline reflectShader;
+    Material reflectMaterial;
+
     vector<vk::raii::CommandBuffer> commandBuffers;
 
     vector<vk::raii::Semaphore> presentCompleteSemaphores;
@@ -89,16 +92,10 @@ private:
     // True when user resizes
     bool frameBufferResized = false;
 
-    //
-    /*vector<Vertex> vertices;
-    vector<uint32_t> indices;
-
-    WBuffer vertexBuffer;
-    WBuffer indexBuffer;*/
-
     Mesh blobMesh;
     Mesh chairMesh;
     Mesh cubeMesh;
+    Mesh testRoom;
 
     vector<WBuffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
 
@@ -110,6 +107,8 @@ private:
     WTexture roughness;
     WTexture ao;
     WTexture testCubeMap;
+
+    WTexture testRoomTexture;
 
     uPtr<GIManager> giManager;
 
@@ -580,11 +579,18 @@ private:
         shaderPipeline.BindDescriptorSets(commandBuffer, testMaterial.descriptorSets[frameIndex]);
         
         // Bind Mesh
-        commandBuffer.bindVertexBuffers(0, *(chairMesh.vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
-        commandBuffer.bindIndexBuffer(*(chairMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
-
+        commandBuffer.bindVertexBuffers(0, *(testRoom.vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
+        commandBuffer.bindIndexBuffer(*(testRoom.indexBuffer.buffer), 0, vk::IndexType::eUint32);
+        
         // IndexCount, InstanceCount, IndexBufferOffset, VertexBufferOffset, InstanceOffset
-        commandBuffer.drawIndexed(chairMesh.indexCount, 1, 0, 0, 0);
+        commandBuffer.drawIndexed(testRoom.indexCount, 1, 0, 0, 0);
+
+        // Draw orb
+        reflectShader.Bind(commandBuffer);
+        reflectShader.BindDescriptorSets(commandBuffer, reflectMaterial.descriptorSets[frameIndex]);
+        commandBuffer.bindVertexBuffers(0, *(blobMesh.vertexBuffer.buffer), { 0 });
+        commandBuffer.bindIndexBuffer(*(blobMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
+        commandBuffer.drawIndexed(blobMesh.indexCount, 1, 0, 0, 0);
 
         commandBuffer.endRendering();
         // END RENDER
@@ -864,31 +870,21 @@ private:
         CreateSwapchain();
         CreateImageViews();
 
-        vector shaderParams = {
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-
-        };
-        shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
-
         CreateCommandPool();
         CreateCommandBuffers();
 
         CreateSyncObjects();
-
-        blobMesh.CreateFromFile(coreReferences, "models/blob.obj", true);
-        chairMesh.CreateFromFile(coreReferences, "models/morrisChair.obj", true);
-        cubeMesh.CreateFromFile(coreReferences, "models/cube.obj");
         CreateUniformBuffers();
 
         CreateDepthResources();
+        CreateDescriptorPool();
+
+        // Other stuff
+        blobMesh.CreateFromFile(coreReferences, "models/blob.obj", true);
+        chairMesh.CreateFromFile(coreReferences, "models/morrisChair.obj", true);
+        cubeMesh.CreateFromFile(coreReferences, "models/cube.obj");
+        testRoom.CreateFromFile(coreReferences, "models/testRoom.obj", true);
+        std::cout << "Test Room Index Count: " << testRoom.indexCount << std::endl;
 
         testTexture.CreateFromFile(coreReferences, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png", vk::Format::eR8G8B8A8Srgb);
         metallic.CreateFromFile(coreReferences, "textures/chair/morrisChair_bigChairMat_Metallic.tga.png", vk::Format::eR8G8B8A8Srgb);
@@ -908,31 +904,11 @@ private:
             "textures/envmaps/stormydays/stormydays_ft.tga",
             "textures/envmaps/stormydays/stormydays_bk.tga"*/
             }, vk::Format::eR8G8B8A8Srgb);
-
         /*CreateTextureImage(testTexture, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");
         CreateTextureImage(metallic, "textures/chair/morrisChair_bigChairMat_Metallic.tga.png");
         CreateTextureImage(roughness, "textures/chair/morrisChair_bigChairMat_Roughness.tga.png");
         CreateTextureImage(ao, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");*/
-
-        CreateDescriptorPool();
-
-        // testGI();
-        //writeToCubemap();
-
-        vector materialParams = {
-            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testTexture}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.vertexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.indexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),// &writtenCubemap }),
-            // ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients}) ATOMIC
-        };
-        testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
-
-        // testCompute();
+        testRoomTexture.CreateFromFile(coreReferences, "textures/testGiPicture.png", vk::Format::eR8G8B8A8Srgb);
 
         vector skyboxShaderParams = {
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
@@ -942,8 +918,62 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
         };
-        skyboxShader.Create(coreReferences, "shaders/skybox.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams, false, true);
+        skyboxShader.Create(coreReferences, "shaders/skybox.spv", &swapSurfaceFormat.format, GetDepthFormat(), skyboxShaderParams, false, true);
         skyboxMaterial.Create(&skyboxShader, coreReferences, skyboxMaterialParams);
+
+        vector shaderParams = {
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+
+        };
+        shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
+        // testGI();
+        //writeToCubemap();
+        vector materialParams = {
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testRoomTexture}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.vertexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),// &writtenCubemap }),
+            // ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients}) ATOMIC
+        };
+        testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
+        vector reflectShaderParams = {
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+        };
+        vector reflectMaterialParams = {
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.vertexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testRoomTexture}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
+            // TODO: SH COEFFS HERE ATOMIC
+        };
+        reflectShader.Create(coreReferences, "shaders/reflect.spv", &swapSurfaceFormat.format, GetDepthFormat(), reflectShaderParams);
+        reflectMaterial.Create(&reflectShader, coreReferences, reflectMaterialParams);
+
+        // testCompute();
 
     }
 
@@ -954,7 +984,7 @@ private:
 
         UniformBufferObject ubo = {
             .off = time,
-            .model = glm::scale(mat4(1.0f), vec3(0.014f)) * glm::rotate(mat4(1.0f), 0*time, vec3(0.0f, 1.0f, 0.0f)),
+            .model = glm::scale(mat4(1.0f), vec3(0.014f+0.5)) * glm::rotate(mat4(1.0f), 0*time, vec3(0.0f, 1.0f, 0.0f)),
             .view = glm::lookAt(mat3(glm::rotate(mat4(1.0f), time, vec3(0,1,0))) * vec3(0,2,5), vec3(0), vec3(0,1,0)),
             .proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 1000.0f), // TODO: increase far
         };

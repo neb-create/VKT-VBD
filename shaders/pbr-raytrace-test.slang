@@ -36,6 +36,9 @@ struct FSInput {
 VSOutput vertMain(VSInput vIn) { //uint vid : SV_VertexID) {
     VSOutput vOut;
     float3 objPos = vIn.position;
+    if (objPos.z > 80.) {
+        objPos.z += 15000.;
+    }
     float4 worldPos = mul(ubo.model, float4(objPos, 1.0));
     vOut.worldPos = worldPos.xyz;
     vOut.position = mul(ubo.proj, mul(ubo.view, worldPos));
@@ -177,18 +180,68 @@ float3 uniformSphere(float2 xi) {
     return normalize(v); // Should already be normalized but just in case
 }
 
-float3 SamplePBR(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao) {
+[shader("fragment")]
+float4 fragMain(FSInput o) : SV_Target
+{
+    float4x4 viewTranspose = transpose(ubo.view);
+    float3 camPos = -mul(float3x3(viewTranspose), viewTranspose[3].xyz);
+    float3 norm = normalize(o.norm);//normalize(o.worldPos); // for sphere for now, but get normals and test them soon
+
+    float3 sta = o.worldPos + norm * 0.01;
+    float3 reflRay = normalize(reflect(o.worldPos - camPos, norm));
+    float3 skyCol = skybox.Sample(reflRay).rgb;
+    float minDist = 10000.;
+    float2 hitUv = o.uv;
+    for (uint32_t i = 0; i < 7440; i += 3) {
+        Vertex vs[3] = Vertex[](vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]]);
+        float3 vp[3] = float3[](
+            mul(ubo.model, float4(vs[0].pos, 1.)).xyz,
+            mul(ubo.model, float4(vs[1].pos, 1.)).xyz,
+            mul(ubo.model, float4(vs[2].pos, 1.)).xyz
+        );
+        // TODO: PUT VERTICES IN WORLD SPACE FOR NOW ( later should localize query to run bvh)
+        float3 cl = cross(vp[2] - vp[0], vp[1] - vp[0]);
+        float area = 0.5 * length(cl);
+        float3 oNorm = normalize(cl);
+        
+        // Plane
+        float dist = -dot(oNorm, sta - vp[0]) / dot(oNorm, reflRay);
+        if (dist > 0.01 && dist < minDist) {
+            float3 hitPnt = sta + reflRay * dist;
+            float b2 = 0.5*length(cross(hitPnt - vp[0], hitPnt - vp[1]));
+            float b0 = 0.5*length(cross(hitPnt - vp[1], hitPnt - vp[2]));
+            float b1 = 0.5*length(cross(hitPnt - vp[2], hitPnt - vp[0]));
+            if (b0 + b1 + b2 <= area) {
+                hitUv = (b0 * vs[0].uv + b1 * vs[1].uv + b2 * vs[2].uv)/area;
+                minDist = dist;
+            }
+        }
+    }
+    float2 uv = o.uv;
+    float3 hitCol;
+    if (minDist < 10000.0) {
+        // Hit object
+        uv = hitUv; // BAD
+        hitCol = textureGammaCorrect(texSampler.Sample(hitUv).rgb);
+    } else {
+        hitCol = SampleSkybox(reflRay, skybox);
+    }
+
+    const float3 albedo = float3(1.);//textureGammaCorrect(texSampler.Sample(uv).rgb); // float3(1.);// // float3(1.0,0.,0.);
+    const float metallic = metallicSampler.Sample(uv).r; // 1.0; // 0.5
+    const float roughness = roughnessSampler.Sample(uv).r;                // 0.1;
+    const float ambientOcclusion = 0.;//aoSampler.Sample(o.uv).r;//0.;
+
     float3 Lo = float3(0.);
-    Lo += 0.03 * ao * albedo; // Ambient Light
+    Lo += 0.03 * ambientOcclusion * albedo; // Ambient Light
 
-    float att = 0.;
-
+    float3 wo = normalize(camPos - o.worldPos);
     for (int i = 0; i < 4; i++) {
-        float3 wi = normalize(light_pos[i] - worldPos);
+        float3 wi = normalize(light_pos[i] - o.worldPos);
         float3 wh = normalize(wo + wi);
 
-        float3 fragToLight = light_pos[i] - worldPos;
-        float attenuation = 1.0 / dot(fragToLight, fragToLight); att += attenuation;
+        float3 fragToLight = light_pos[i] - o.worldPos;
+        float attenuation = 1.0 / dot(fragToLight, fragToLight);
         float3 Li = light_col[i] * attenuation;
 
         //
@@ -210,64 +263,25 @@ float3 SamplePBR(float3 wo, float3 worldPos, float3 norm, float3 albedo, float m
         float3 kd = float3(1.0) - ks;
         kd *= 1.0 - metallic; // More metal less diffuse
 
-        Lo += fCookTorrance * Li * lambert; // Specular
-        Lo += kd * fLambert * Li * lambert; // Diffuse
+        // Lo += fCookTorrance * Li * lambert; // Specular
+        // Lo += kd * fLambert * Li * lambert; // Diffuse
     }
 
-    return Lo;
-}
+    Lo += SampleSkybox(norm, skybox);//albedo * INVPI * sampleSh(norm);
+    // Lo = Lo *0.5 + 2.0 * hitCol;
 
-[shader("fragment")]
-float4 fragMain(FSInput o) : SV_Target
-{
-    float4x4 viewTranspose = transpose(ubo.view);
-    float3 camPos = -mul(float3x3(viewTranspose), viewTranspose[3].xyz);
-    float3 norm = normalize(o.norm);//normalize(o.worldPos); // for sphere for now, but get normals and test them soon
+    float3 col = gammaCorrect(reinhardOp(Lo));
 
-    const float3 albedo = textureGammaCorrect(texSampler.Sample(o.uv).rgb); // float3(1.);// // float3(1.0,0.,0.);
-    const float metallic = 0.;        // metallicSampler.Sample(o.uv).r; // 1.0; // 0.5
-    const float roughness = 0.2;//roughnessSampler.Sample(o.uv).r;                // 0.1;
-    const float ambientOcclusion = 0.;//aoSampler.Sample(o.uv).r;//0.;
-
-    float3 Lo = float3(0.);
-    Lo += 0.03 * ambientOcclusion * albedo; // Ambient Light
-
-    float3 wo = normalize(camPos - o.worldPos);
-    // for (int i = 0; i < 4; i++) {
-    //     float3 wi = normalize(light_pos[i] - o.worldPos);
-    //     float3 wh = normalize(wo + wi);
-
-    //     float3 fragToLight = light_pos[i] - o.worldPos;
-    //     float attenuation = 1.0 / dot(fragToLight, fragToLight);
-    //     float3 Li = light_col[i] * attenuation;
-
-    //     //
-    //     float3 fresnelCol = lerp(float3(0.04), albedo, metallic);
-    //     float3 fresnel = fresnelShlick(max(dot(wh, wo), 0.0), fresnelCol);
-
-    //     float distrib = distribFunc(norm, wh, roughness);
-
-    //     float geom = geomOcclusion(wo, wi, norm, roughness);
-
-    //     //
-    //     float lambert = max(0., dot(wi, norm));
-
-    //     //
-    //     float3 fCookTorrance = fresnel * distrib * geom / (4.0 * dot(norm, wo) * dot(norm, wi));
-    //     float3 fLambert = albedo * INVPI;
-
-    //     float3 ks = fresnel;
-    //     float3 kd = float3(1.0) - ks;
-    //     kd *= 1.0 - metallic; // More metal less diffuse
-
-    //     Lo += fCookTorrance * Li * lambert; // Specular
-    //     //Lo += kd * fLambert * Li * lambert; // Diffuse
+    // float3 val = 0.;
+    // for (uint i = 0; i < 5000; i++) {
+    //     // val += uniformSphere(float2(
+    //     //     rngf(o.worldPos.x+float(i)),//rng(uint2(abs(o.worldPos.xy*10.)) + i),
+    //     //     rngf(o.worldPos.y-float(i))//rng(uint2(abs(o.worldPos.yx*10.)) + i+4)
+    //     // ));
+    //     val += step(rngi(int(o.worldPos.x * 246.) + i),0.5)*2.-1.;
     // }
-
-    // // Lo += SampleSkybox(norm, skybox);//albedo * INVPI * sampleSh(norm);
-    // // Lo = Lo *0.5 + 2.0 * hitCol;
-
-    float3 col = gammaCorrect(reinhardOp(SamplePBR(wo, o.worldPos+norm*0.01, norm, albedo, metallic, roughness, ambientOcclusion)));
+    // val /= 5000.;
+    // float v = shCoefficients[26]-64.*8.;
 
     return float4(col, 1.);
 
