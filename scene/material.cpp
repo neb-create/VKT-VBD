@@ -41,7 +41,10 @@ void Material::CreateDescriptorSets(const VulkanReferences& ref, const vector<Sh
 
             switch (param.type) {
             case ShaderParameter::Type::UNIFORM:
-                assert(param.uniform.uniformBuffers->size() == duplicationCount);
+                assert(param.uniform.uniformBuffers->size() >= duplicationCount);
+                if (param.uniform.uniformBuffers->size() != duplicationCount) {
+                    std::cerr << "Uniform Buffer Duplication Count is greater than material's duplication count, this is weird but COULD BE valid." << std::endl;
+                }
                 ss.push_back(
                     vk::DescriptorBufferInfo{
                         .buffer = (*(param.uniform.uniformBuffers))[i].buffer,

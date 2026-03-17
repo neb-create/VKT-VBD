@@ -1,4 +1,5 @@
 import Raytracing;
+import PBR;
 
 struct UniformBuffer {
     float off;
@@ -50,172 +51,11 @@ Sampler2D metallicSampler;
 Sampler2D roughnessSampler;
 Sampler2D aoSampler;
 
-struct Vertex {
-    float3 pos;
-    float3 color;
-    float2 uv;
-    float3 norm;
-};
-
 StructuredBuffer<Vertex> vertices;
 StructuredBuffer<uint32_t> indices;
 
 SamplerCube skybox;
-
 StructuredBuffer<float> shCoefficients;
-float3 sampleSh(float3 rd) {
-
-    float cosCo1 = PI;
-    float cosCo2 = (2. / 3.) * PI;
-    float cosCo3 = PI * .25;
-    float mult = 4. * PI / (128.*128.);
-    // TODO: put in module andor generate into a cubemap so we dont have to do math after caching
-    float3 c1 = mult * cosCo1 * float3(shCoefficients[0], shCoefficients[1], shCoefficients[2]);
-
-    float3 c2 = mult * cosCo2 * float3(shCoefficients[3], shCoefficients[4], shCoefficients[5]);
-    float3 c3 = mult * cosCo2 * float3(shCoefficients[6], shCoefficients[7], shCoefficients[8]);
-    float3 c4 = mult * cosCo2 * float3(shCoefficients[9], shCoefficients[10], shCoefficients[11]);
-
-    float3 c5 = mult * cosCo3 * float3(shCoefficients[12], shCoefficients[13], shCoefficients[14]);
-    float3 c6 = mult * cosCo3 * float3(shCoefficients[15], shCoefficients[16], shCoefficients[17]);
-    float3 c7 = mult * cosCo3 * float3(shCoefficients[18], shCoefficients[19], shCoefficients[20]);
-    float3 c8 = mult * cosCo3 * float3(shCoefficients[21], shCoefficients[22], shCoefficients[23]);
-    float3 c9 = mult * cosCo3 * float3(shCoefficients[24], shCoefficients[25], shCoefficients[26]);
-
-    return 
-        c1 * 0.28209479 +
-        (-1.) * c2 * 0.4886025119029199 * rd.y +
-        c3 * 0.4886025119029199 * rd.z +
-        (-1.) * c4 * 0.4886025119029199 * rd.x +
-        c5 * 1.0925484305920792 * rd.x * rd.y +
-        (-1.) * c6 * 1.0925484305920792 * rd.y * rd.z +
-        c7 * 0.31539156525252005 * (3 * rd.z * rd.z - 1) +
-        (-1.) * c8 * 1.0925484305920792 * rd.x * rd.z +
-        c9 * 0.5462742152960396 * (rd.x * rd.x - rd.y * rd.y);
-
-    // TODO: complete and remember we have to get the cosine term too
-    // convolution of f and g multiplied is equal to frequency version of f multiplied by frequency version of g (find frequency ver of cos online)
-}
-
-static float3 light_pos[4] = float3[](float3(-10, 10, 10),
-                                      float3(10, 10, 10),
-                                      float3(-10, -10, 10),
-                                      float3(10, -10, 10));
-
-static float3 light_col[4] = float3[](float3(300.f, 300.f, 900.f),
-                                      float3(300.f, 900.f, 300.f),
-                                      float3(900.f, 300.f, 300.f),
-                                      float3(300.f, 300.f, 900.f));
-
-static float PI = 3.14159f;
-static float INVPI = 0.31830988618;
-
-float3 fresnelShlick(float cosAngleFromMicroNormal, float3 baseCol) {
-    return baseCol + (float3(1.0) - baseCol) * pow(1.0 - cosAngleFromMicroNormal, 5.);
-}
-
-float distribFunc(float3 macroNormal, float3 microNormal, float roughness) {
-    float a = roughness * roughness;
-    return a * a * INVPI * 1.0
-            / pow(
-                pow(dot(macroNormal, microNormal), 2.)
-                * (a * a - 1.) + 1.,
-                    2.);
-}
-
-float gShlick(float cosW, float k) {
-    return cosW / (cosW * (1.0 - k) + k);
-}
-
-float geomOcclusion(float3 wo, float3 wi, float3 macroNormal, float roughness) {
-    float k = 1.0; // pow(roughness+1, 2.) / 8.;
-    return gShlick(dot(wo, macroNormal), k) * gShlick(dot(wi, macroNormal), k);
-}
-
-float3 reinhardOp(float3 energy) {
-    return energy / (1.0 + energy);
-}
-
-float3 gammaCorrect(float3 col) {
-    return pow(col, float3(1. / 2.2));
-}
-
-float3 textureGammaCorrect(float3 texColor) {
-    return pow(texColor, float3(2.2));
-}
-
-float2 hash22(float2 p)
-{
-    float3 p3 = fract(p.xyx * float3(.1031, .1030, .0973));
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.xx + p3.yz) * p3.zy);
-}
-
-// from ShaderToy https://www.shadertoy.com/view/4tXyWN
-float rng(uint2 seed) {
-    uint2 q = 1103515245U * ((seed >> 1U) ^ (seed.yx));
-    uint n = 1103515245U * ((q.x) ^ (q.y >> 3U));
-    return float(n) * (1.0 / float(0xffffffffU));
-}
-
-float rngf(float f) {
-    return fract(8592.682 * sin(f * 32.301));
-}
-
-float rngi(int i) {
-    return fract(8592.682 * sin(float(i)*0.0325 * 32.301));
-}
-
-float3 uniformSphere(float2 xi) {
-    float theta = xi.x * 2. * PI;
-
-    float y = xi.y * 2. - 1.;
-    float r = 1. - y * y;
-
-    float3 v = float3(r * float2(cos(theta), sin(theta)), y).xzy;
-
-    return normalize(v); // Should already be normalized but just in case
-}
-
-float3 SamplePBR(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao) {
-    float3 Lo = float3(0.);
-    Lo += 0.03 * ao * albedo; // Ambient Light
-
-    float att = 0.;
-
-    for (int i = 0; i < 4; i++) {
-        float3 wi = normalize(light_pos[i] - worldPos);
-        float3 wh = normalize(wo + wi);
-
-        float3 fragToLight = light_pos[i] - worldPos;
-        float attenuation = 1.0 / dot(fragToLight, fragToLight); att += attenuation;
-        float3 Li = light_col[i] * attenuation;
-
-        //
-        float3 fresnelCol = lerp(float3(0.04), albedo, metallic);
-        float3 fresnel = fresnelShlick(max(dot(wh, wo), 0.0), fresnelCol);
-
-        float distrib = distribFunc(norm, wh, roughness);
-
-        float geom = geomOcclusion(wo, wi, norm, roughness);
-
-        //
-        float lambert = max(0., dot(wi, norm));
-
-        //
-        float3 fCookTorrance = fresnel * distrib * geom / (4.0 * dot(norm, wo) * dot(norm, wi));
-        float3 fLambert = albedo * INVPI;
-
-        float3 ks = fresnel;
-        float3 kd = float3(1.0) - ks;
-        kd *= 1.0 - metallic; // More metal less diffuse
-
-        Lo += fCookTorrance * Li * lambert; // Specular
-        Lo += kd * fLambert * Li * lambert; // Diffuse
-    }
-
-    return Lo;
-}
 
 [shader("fragment")]
 float4 fragMain(FSInput o) : SV_Target
@@ -233,41 +73,8 @@ float4 fragMain(FSInput o) : SV_Target
     Lo += 0.03 * ambientOcclusion * albedo; // Ambient Light
 
     float3 wo = normalize(camPos - o.worldPos);
-    // for (int i = 0; i < 4; i++) {
-    //     float3 wi = normalize(light_pos[i] - o.worldPos);
-    //     float3 wh = normalize(wo + wi);
 
-    //     float3 fragToLight = light_pos[i] - o.worldPos;
-    //     float attenuation = 1.0 / dot(fragToLight, fragToLight);
-    //     float3 Li = light_col[i] * attenuation;
-
-    //     //
-    //     float3 fresnelCol = lerp(float3(0.04), albedo, metallic);
-    //     float3 fresnel = fresnelShlick(max(dot(wh, wo), 0.0), fresnelCol);
-
-    //     float distrib = distribFunc(norm, wh, roughness);
-
-    //     float geom = geomOcclusion(wo, wi, norm, roughness);
-
-    //     //
-    //     float lambert = max(0., dot(wi, norm));
-
-    //     //
-    //     float3 fCookTorrance = fresnel * distrib * geom / (4.0 * dot(norm, wo) * dot(norm, wi));
-    //     float3 fLambert = albedo * INVPI;
-
-    //     float3 ks = fresnel;
-    //     float3 kd = float3(1.0) - ks;
-    //     kd *= 1.0 - metallic; // More metal less diffuse
-
-    //     Lo += fCookTorrance * Li * lambert; // Specular
-    //     //Lo += kd * fLambert * Li * lambert; // Diffuse
-    // }
-
-    // // Lo += SampleSkybox(norm, skybox);//albedo * INVPI * sampleSh(norm);
-    // // Lo = Lo *0.5 + 2.0 * hitCol;
-
-    float3 col = gammaCorrect(reinhardOp(SamplePBR(wo, o.worldPos+norm*0.01, norm, albedo, metallic, roughness, ambientOcclusion)));
+    float3 col = gammaCorrect(reinhardOp(SamplePBR(wo, o.worldPos+norm*0.01, norm, albedo, metallic, roughness, ambientOcclusion, shCoefficients)));
 
     return float4(col, 1.);
 

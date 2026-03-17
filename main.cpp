@@ -18,6 +18,7 @@
 #include "scene/shader-parameter.h"
 #include "scene/render-pass.h"
 #include "scene/render-target.h"
+#include "lighting/probe-creator.h"
 
 #include "lighting/gi-manager.h"
 
@@ -860,6 +861,9 @@ private:
         pass.FinishExecute(vk::ImageLayout::eShaderReadOnlyOptimal);
     }
 
+    WBuffer* skySh;
+    uPtr<WBuffer> envSh;
+    ProbeCreator pc;
     void InitVulkan() {
         CreateInstance();
         SetupDebugMessenger();
@@ -935,6 +939,9 @@ private:
         };
         shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
         // testGI();
+        pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao);
+        skySh = pc.BakeAndSetSkyboxProbe();
+        envSh = std::move(pc.BakeEnvironmentProbe(vec3(0.0f)));
         //writeToCubemap();
         vector materialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
@@ -945,7 +952,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.vertexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),// &writtenCubemap }),
-            // ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients}) ATOMIC
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = skySh})
         };
         testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
         vector reflectShaderParams = {
@@ -968,7 +975,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-            // TODO: SH COEFFS HERE ATOMIC
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = envSh.get()})
         };
         reflectShader.Create(coreReferences, "shaders/reflect.spv", &swapSurfaceFormat.format, GetDepthFormat(), reflectShaderParams);
         reflectMaterial.Create(&reflectShader, coreReferences, reflectMaterialParams);

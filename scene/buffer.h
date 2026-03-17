@@ -10,6 +10,7 @@ public:
 	void* MapMemory();
 	void UnmapMemory();
 	void CopyFrom(const VulkanReferences& ref, const WBuffer& src, vk::DeviceSize size = 0);
+	void SetData(const VulkanReferences&, vk::DeviceSize, void* data);
 
 	void* mappedMemory;
 	vk::raii::Buffer buffer = nullptr;

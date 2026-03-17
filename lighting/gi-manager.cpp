@@ -8,7 +8,7 @@
 #include <iostream>
 
 void GIManager::Test(WTexture* skybox) {
-	GenerateSHCoefficients(skybox);
+	// GenerateSHCoefficients(skybox);
 }
 
 void GIManager::GenerateSHCoefficients(WTexture* skybox) {

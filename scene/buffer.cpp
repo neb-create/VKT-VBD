@@ -18,6 +18,7 @@ void WBuffer::Create(const VulkanReferences& ref, vk::DeviceSize size, vk::Buffe
 
 void WBuffer::CreateDeviceLocalFromData(const VulkanReferences& ref, vk::DeviceSize size, vk::BufferUsageFlags usage, void* data)
 {
+    assert((usage & vk::BufferUsageFlagBits::eTransferDst) == vk::BufferUsageFlagBits::eTransferDst); // To transfer data into it
     WBuffer stagingBuffer;
     stagingBuffer.Create(ref, size,
         vk::BufferUsageFlagBits::eTransferSrc, // Can be source of a transfer
@@ -29,7 +30,6 @@ void WBuffer::CreateDeviceLocalFromData(const VulkanReferences& ref, vk::DeviceS
     memcpy(stagingBuffer.mappedMemory, data, size);
     stagingBuffer.UnmapMemory();
 
-    assert((usage & vk::BufferUsageFlagBits::eTransferDst) == vk::BufferUsageFlagBits::eTransferDst);
     Create(ref, size, usage,
         vk::MemoryPropertyFlagBits::eDeviceLocal // Device local, can't map memory directly
     );
@@ -39,6 +39,20 @@ void WBuffer::CreateDeviceLocalFromData(const VulkanReferences& ref, vk::DeviceS
     // Staging allows us to use high performance memory for loading data
     // In practice, not good to do a separate allocation for every object, better to do one big one and split it up (VulkanMemoryAllocator library)
     // You should even go a step further, allocate a single vertex and index buffer for lots of things and use offsets to bindvertexbuffers to store lots of 3D objects
+}
+
+void WBuffer::SetData(const VulkanReferences& ref, vk::DeviceSize size, void* data) {
+    WBuffer stagingBuffer;
+    stagingBuffer.Create(ref, size,
+        vk::BufferUsageFlagBits::eTransferSrc,
+        vk::MemoryPropertyFlagBits::eHostVisible |
+        vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    // Fill Vertex Buffer w Data
+    stagingBuffer.MapMemory(); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
+    memcpy(stagingBuffer.mappedMemory, data, size);
+    stagingBuffer.UnmapMemory();
+    CopyFrom(ref, stagingBuffer);
 }
 
 void* WBuffer::MapMemory() {
