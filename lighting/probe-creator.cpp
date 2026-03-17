@@ -1,7 +1,18 @@
 #include "probe-creator.h"
+#include <iostream>
 
+struct UProbePosition {
+	alignas(16) vec3 probePos;
+};
 
-// TODO: all these params def annoying not having it, need to have some struct to represent the world
+int ceilToNearest(int v, int m) {
+	int f = v % m;
+	int g = v / m;
+	std::cout << (g * m + (f != 0 ? 1 : 0)) << std::endl;
+	return g * m + (f != 0 ? 1 : 0);
+}
+
+// TODO: all these params def annoying so not having it, need to have some struct to represent the world
 void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<WBuffer>* uniformBuffers, WTexture* testCubeMap, Mesh* testRoom, WTexture* testRoomTexture, WTexture* metallic, WTexture* roughness, WTexture* ao) {
 	this->ref = ref;
 
@@ -26,8 +37,14 @@ void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<
 	skyboxSh = mkU<WBuffer>();
 	skyboxSh->Create(*ref, 27 * sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
+	// Create Empty Probe Position Buffer
+	probePositionUBO.push_back(WBuffer());
+	probePositionUBO[0].Create(*ref, ceilToNearest(sizeof(UProbePosition), 16), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	probePositionUBO[0].MapMemory();
+
 	// Create Environment Probe Baker
 	vector envShaParams = {
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eCompute },
 		ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eCompute },
 		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
 		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
@@ -40,6 +57,7 @@ void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<
 		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
 	};
 	vector envMatParams = {
+		ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &probePositionUBO}),
 		ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = uniformBuffers}),
 		ShaderParameter::MParameter(ShaderParameter::USampler {.texture = testCubeMap}),
 		ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom->vertexBuffer}),
@@ -82,9 +100,16 @@ void ProbeCreator::ZeroOutScratchBuffer() {
 uPtr<WBuffer> ProbeCreator::BakeEnvironmentProbe(vec3 pos) {
 	// TODO: until we decouple compute material and pipeline (compute material either inherits or is straight up equal to material for now), just do skybox ignore pos
 	// well actually we dont decouple until we do stuff in parallel, for now and for a while just vary some uniform buffer that contains position and do one at a time..
+	// scratch buffer makes doing stuff in parallel annoying anyways, atomic so much easier
 	
 	// Must have skybox baked to bake env
 	assert(isSkyboxBaked);
+
+	// Update UBO
+	UProbePosition probePosStruct = {
+		.probePos = pos
+	};
+	memcpy(probePositionUBO[0].mappedMemory, &probePosStruct, sizeof(UProbePosition)); // Copy doesn't have to be 16-aligned, 4 byte padding can be trash
 
 	// Dispatch
 	computeDispatcher.StartRecord(*ref);

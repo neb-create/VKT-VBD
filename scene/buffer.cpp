@@ -68,6 +68,10 @@ void WBuffer::UnmapMemory() {
     mappedMemory = nullptr;
 }
 
+void WBuffer::EnqueueCopyFrom(vk::raii::CommandBuffer* cmd, const VulkanReferences& ref, const WBuffer& src, vk::DeviceSize size) {
+    cmd->copyBuffer(src.buffer, buffer, vk::BufferCopy(0, 0, size)); // From where to where
+}
+
 void WBuffer::CopyFrom(const VulkanReferences& ref, const WBuffer& src, vk::DeviceSize size) {
     if (size == 0) {
         size = bufferSize;

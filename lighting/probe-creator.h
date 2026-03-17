@@ -34,6 +34,9 @@ private:
 	ComputePipeline bakeSkyboxProbe;
 
 	ComputeDispatcher computeDispatcher;
+
+	vector<WBuffer> probePositionUBO; // shouldn't have to do vector..
+	// WBuffer probePositionUBO;
 };
 
 // need to change spherical harmonic shader (how to flatten group id & thread id) as well as sampling shader (how much to divide sh sample, or just do it when cpu accuming) if you change this
