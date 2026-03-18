@@ -161,15 +161,17 @@ uPtr<ProbeVolume> ProbeCreator::BakeEnvironmentProbes(glm::uvec3 probeCounts, ve
 	memcpy(probeVolume->probeLayoutUBO[0].mappedMemory, &uProbeLayout, sizeof(UProbeLayout));
 
 	// Bake all probes
-	for (int i = 0; i < probeCounts.x; i++) {
+	for (int k = 0; k < probeCounts.z; k++) {
 		for (int j = 0; j < probeCounts.y; j++) {
-			for (int k = 0; k < probeCounts.z; k++) {
+			for (int i = 0; i < probeCounts.x; i++) {
 				vec3 uv = vec3(i, j, k) / (vec3(probeCounts)-vec3(1));
 				vec3 pos = transform * vec4(uv, 1.0);
 
 				vk::DeviceSize flattenedIndex = k * probeCounts.y * probeCounts.x + j * probeCounts.x + i;
 
 				BakeEnvironmentProbe(pos, &probeVolume->shCoefficients, flattenedIndex * shSize);
+
+				std::cout << "Baked Probe " << (flattenedIndex+1) << "/" << (probeCounts.x * probeCounts.y * probeCounts.z) << std::endl;
 			}
 		}
 	}

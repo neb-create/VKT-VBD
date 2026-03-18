@@ -9,7 +9,7 @@ public struct Vertex {
 };
 
 public float3 SampleSkybox(float3 rd, SamplerCube skybox) {
-    return 10.*skybox.Sample(rd).rgb;//pow(skybox.Sample(rd).rgb,float3(2.2));
+    return 10. * skybox.Sample(rd).rgb; // pow(skybox.Sample(rd).rgb,float3(2.2));  10.*float3(0.4, 0.5, 1.0);/
 }
 
 // For reflections, ro is position of first hitPos from camera (the frag pos), rd is reflected ray

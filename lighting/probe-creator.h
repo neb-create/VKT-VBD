@@ -44,7 +44,7 @@ private:
 };
 
 // need to change spherical harmonic shader (how to flatten group id & thread id) as well as sampling shader (how much to divide sh sample, or just do it when cpu accuming) if you change this
-constexpr uint32_t SQRT_THREAD_COUNT = 128;
+constexpr uint32_t SQRT_THREAD_COUNT = 128; // Sqrt Sample Count
 constexpr uint32_t SQRT_THREADS_PER_GROUP = 8;
 
 constexpr uint32_t GROUP_COUNT = (SQRT_THREAD_COUNT / SQRT_THREADS_PER_GROUP) * (SQRT_THREAD_COUNT / SQRT_THREADS_PER_GROUP);

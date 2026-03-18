@@ -42,8 +42,13 @@ public float3 SampleSh(float3 rd, StructuredBuffer<float> shCoefficients, uint b
            c9 * 0.5462742152960396 * (rd.x * rd.x - rd.y * rd.y);
 }
 
+#define DEBUG_OUT_OF_BOUNDS 0
+
 public float3 SampleInterpolatedSh(float3 rd, float3 pos, StructuredBuffer<float> shCoefficients, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
     float3 lp = mul(probeLayout.invTransform, float4(pos, 1.)).xyz; // [0, 1] unless out of bounds
+    #if DEBUG_OUT_OF_BOUNDS
+    bool outOfBounds = min(lp.x, min(lp.y, lp.z)) < 0. || max(lp.x, max(lp.y, lp.z)) >= 1.;
+    #endif
     lp = clamp(lp, float3(0.), float3(0.99999));                    // [0, 1)
     lp *= probeLayout.probeCounts-1;
 
@@ -69,6 +74,12 @@ public float3 SampleInterpolatedSh(float3 rd, float3 pos, StructuredBuffer<float
     float3 c1 = lerp(c10, c11, fac.y);
 
     float3 c = lerp(c0, c1, fac.x);
+
+    #if DEBUG_OUT_OF_BOUNDS
+    if (outOfBounds) {
+        c = float3(2., 0., 2.);
+    }
+    #endif
 
     return c;//float3(id) * 0.1;
 }

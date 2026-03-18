@@ -56,3 +56,20 @@ Rendering blob and chair using Spherical Harmonics Diffuse Convolution with whit
 | ![](ShowcaseMedia/blobSkybox.gif) | ![](ShowcaseMedia/blobSHDiffuseConvolution.gif) |
 
 Can bake  -->
+
+---
+## 3/18/2026 Update
+
+- Baking many diffuse probes, no longer using float atomics so that the renderer has better compatibility
+- More refactoring for Vulkan Renderer
+- Render skybox cubemap
+
+![](ShowcaseMedia/skyboxXZProbes.gif)
+
+80x10x80 probe grid w/ skybox
+
+![](ShowcaseMedia/noSkyboxXZProbes.gif)
+
+80x10x80 probe grid w/o skybox
+
+Need to do probe visibility checking & optimize probe bake compute shader, likely through BVH and parallelization.
