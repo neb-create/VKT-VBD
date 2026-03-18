@@ -587,11 +587,11 @@ private:
         commandBuffer.drawIndexed(testRoom.indexCount, 1, 0, 0, 0);
 
         // Draw orb
-        reflectShader.Bind(commandBuffer);
+        /*reflectShader.Bind(commandBuffer);
         reflectShader.BindDescriptorSets(commandBuffer, reflectMaterial.descriptorSets[frameIndex]);
         commandBuffer.bindVertexBuffers(0, *(blobMesh.vertexBuffer.buffer), { 0 });
         commandBuffer.bindIndexBuffer(*(blobMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
-        commandBuffer.drawIndexed(blobMesh.indexCount, 1, 0, 0, 0);
+        commandBuffer.drawIndexed(blobMesh.indexCount, 1, 0, 0, 0);*/
 
         commandBuffer.endRendering();
         // END RENDER
@@ -862,7 +862,7 @@ private:
     }
 
     WBuffer* skySh;
-    uPtr<WBuffer> envSh;
+    uPtr<ProbeVolume> envSh;
     ProbeCreator pc;
     void InitVulkan() {
         CreateInstance();
@@ -935,6 +935,7 @@ private:
             ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eFragment },
 
         };
         shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
@@ -942,7 +943,7 @@ private:
         UpdateUniformBuffer(0);
         pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao);
         skySh = pc.BakeAndSetSkyboxProbe();
-        envSh = std::move(pc.BakeEnvironmentProbe(vec3(0, 0, 4)));
+        envSh = std::move(pc.BakeEnvironmentProbes(uvec3(15, 15, 15), vec3(0), vec3(10)));
         //writeToCubemap();
         vector materialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
@@ -953,7 +954,8 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.vertexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),// &writtenCubemap }),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = skySh})
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &envSh->shCoefficients}),
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &envSh->probeLayoutUBO}),
         };
         testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
         vector reflectShaderParams = {
@@ -976,7 +978,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = envSh.get() })
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = skySh }) // TODO: modify samplepbr to interpolate between sh samples
         };
         reflectShader.Create(coreReferences, "shaders/reflect.spv", &swapSurfaceFormat.format, GetDepthFormat(), reflectShaderParams);
         reflectMaterial.Create(&reflectShader, coreReferences, reflectMaterialParams);

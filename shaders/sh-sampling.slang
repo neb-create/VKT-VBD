@@ -2,6 +2,15 @@ module SHSampling;
 
 #define PI 3.141592
 
+public struct UProbeVolumeLayout {
+    float4x4 invTransform;
+    uint3 probeCounts;
+};
+
+uint probeIDToOffset(uint3 probeCounts, uint3 id) {
+    return 27 * (probeCounts.x * probeCounts.y * id.z + probeCounts.x * id.y + id.x);
+}
+
 // TODO: potentially put skybox SH into cubemap since it's one of a kind and is used a lot
 public float3 SampleSh(float3 rd, StructuredBuffer<float> shCoefficients, uint bufferOffset) {
 
@@ -31,4 +40,35 @@ public float3 SampleSh(float3 rd, StructuredBuffer<float> shCoefficients, uint b
            c7 * 0.31539156525252005 * (3 * rd.z * rd.z - 1) +
            (-1.) * c8 * 1.0925484305920792 * rd.x * rd.z +
            c9 * 0.5462742152960396 * (rd.x * rd.x - rd.y * rd.y);
+}
+
+public float3 SampleInterpolatedSh(float3 rd, float3 pos, StructuredBuffer<float> shCoefficients, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
+    float3 lp = mul(probeLayout.invTransform, float4(pos, 1.)).xyz; // [0, 1] unless out of bounds
+    lp = clamp(lp, float3(0.), float3(0.99999));                    // [0, 1)
+    lp *= probeLayout.probeCounts-1;
+
+    float3 fac = fract(lp);
+    uint3 id = uint3(lp);
+    uint2 d = uint2(1, 0);
+
+    float3 c000 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yyy));
+    float3 c001 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yyx));
+    float3 c010 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yxy));
+    float3 c011 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yxx));
+    float3 c100 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xyy));
+    float3 c101 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xyx));
+    float3 c110 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xxy));
+    float3 c111 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xxx));
+
+    float3 c00 = lerp(c000, c001, fac.z);
+    float3 c01 = lerp(c010, c011, fac.z);
+    float3 c10 = lerp(c100, c101, fac.z);
+    float3 c11 = lerp(c110, c111, fac.z);
+
+    float3 c0 = lerp(c00, c01, fac.y);
+    float3 c1 = lerp(c10, c11, fac.y);
+
+    float3 c = lerp(c0, c1, fac.x);
+
+    return c;//float3(id) * 0.1;
 }

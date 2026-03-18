@@ -41,7 +41,7 @@ void WBuffer::CreateDeviceLocalFromData(const VulkanReferences& ref, vk::DeviceS
     // You should even go a step further, allocate a single vertex and index buffer for lots of things and use offsets to bindvertexbuffers to store lots of 3D objects
 }
 
-void WBuffer::SetData(const VulkanReferences& ref, vk::DeviceSize size, void* data) {
+void WBuffer::SetData(const VulkanReferences& ref, void* data, vk::DeviceSize size, vk::DeviceSize dstOffset) {
     WBuffer stagingBuffer;
     stagingBuffer.Create(ref, size,
         vk::BufferUsageFlagBits::eTransferSrc,
@@ -52,7 +52,7 @@ void WBuffer::SetData(const VulkanReferences& ref, vk::DeviceSize size, void* da
     stagingBuffer.MapMemory(); // (0, bufSize) are offset and size; Map vertex buffer data to cpu memory
     memcpy(stagingBuffer.mappedMemory, data, size);
     stagingBuffer.UnmapMemory();
-    CopyFrom(ref, stagingBuffer);
+    CopyFrom(ref, stagingBuffer, size, dstOffset);
 }
 
 void* WBuffer::MapMemory() {
@@ -72,11 +72,11 @@ void WBuffer::EnqueueCopyFrom(vk::raii::CommandBuffer* cmd, const VulkanReferenc
     cmd->copyBuffer(src.buffer, buffer, vk::BufferCopy(0, 0, size)); // From where to where
 }
 
-void WBuffer::CopyFrom(const VulkanReferences& ref, const WBuffer& src, vk::DeviceSize size) {
+void WBuffer::CopyFrom(const VulkanReferences& ref, const WBuffer& src, vk::DeviceSize size, vk::DeviceSize dstOffset) {
     if (size == 0) {
         size = bufferSize;
     }
     auto cmd = BeginOneTimeCommands(ref);
-    cmd.copyBuffer(src.buffer, buffer, vk::BufferCopy(0, 0, size)); // From where to where
+    cmd.copyBuffer(src.buffer, buffer, vk::BufferCopy(0, dstOffset, size)); // From where to where
     SubmitOneTimeCommands(ref, &cmd);
 }

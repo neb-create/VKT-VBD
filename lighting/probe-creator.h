@@ -8,18 +8,23 @@
 
 using namespace glm;
 
-struct Probe {
+struct ProbeVolume {
 	WBuffer shCoefficients;
-	// TODO: octahedral depth map here
+	glm::uvec3 probeCounts;
+	glm::mat4 invTransform; // to (0, 1)
+	vector<WBuffer> probeLayoutUBO; // shouldn't have to be vector TODO: uniform stuff
+	// TODO: octahedral depth map atlas here with gutter which will be filled in post process step
 }; // TODO: use
 
 class ProbeCreator {
 public:
 	void Create(const VulkanReferences*, WTexture* skybox, vector<WBuffer>* uniformBuffers, WTexture* testCubeMap, Mesh* testRoom, WTexture* testRoomTexture, WTexture* metallic, WTexture* roughness, WTexture* ao);
-	uPtr<WBuffer> BakeEnvironmentProbe(vec3 pos);
+	uPtr<ProbeVolume> BakeEnvironmentProbes(glm::uvec3 probeCount, vec3 boundingBoxOrigin, vec3 boundingBoxSize);
+	
 	WBuffer* BakeAndSetSkyboxProbe();
 private:
-	void AccumulateScratchIntoBuffer(WBuffer* buf);
+	void BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset);
+	void AccumulateScratchIntoBuffer(WBuffer* buf, vk::DeviceSize offset);
 	void ZeroOutScratchBuffer();
 
 	const VulkanReferences* ref;
@@ -36,7 +41,6 @@ private:
 	ComputeDispatcher computeDispatcher;
 
 	vector<WBuffer> probePositionUBO; // shouldn't have to do vector..
-	// WBuffer probePositionUBO;
 };
 
 // need to change spherical harmonic shader (how to flatten group id & thread id) as well as sampling shader (how much to divide sh sample, or just do it when cpu accuming) if you change this

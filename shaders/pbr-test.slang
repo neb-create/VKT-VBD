@@ -1,5 +1,6 @@
 import Raytracing;
 import PBR;
+import sh_sampling;
 
 struct UniformBuffer {
     float off;
@@ -56,6 +57,7 @@ StructuredBuffer<uint32_t> indices;
 
 SamplerCube skybox;
 StructuredBuffer<float> shCoefficients;
+ConstantBuffer<UProbeVolumeLayout> probeLayout;
 
 [shader("fragment")]
 float4 fragMain(FSInput o) : SV_Target
@@ -74,7 +76,7 @@ float4 fragMain(FSInput o) : SV_Target
 
     float3 wo = normalize(camPos - o.worldPos);
 
-    float3 col = gammaCorrect(reinhardOp(SamplePBR(wo, o.worldPos+norm*0.01, norm, albedo, metallic, roughness, ambientOcclusion, shCoefficients)));
+    float3 col = gammaCorrect(reinhardOp(SamplePBREnv(wo, o.worldPos+norm*0.01, norm, albedo, metallic, roughness, ambientOcclusion, shCoefficients, probeLayout)));
 
     return float4(col, 1.);
 

@@ -62,7 +62,7 @@ public float3 SampleEnvironment(float3 ro, float3 rd,
         float metallic = 0.;   // worldMetal.Sample(hitUv).r;
         float roughness = 0.2; // worldRoughness.Sample(hitUv).r;
         float ao = 0.;         // worldAO.Sample(hitUv).r;
-        return SamplePBR(normalize(ro - hitPos), hitPos, hitNorm, albedo, metallic, roughness, ao, skyboxSh);
+        return SamplePBRSky(normalize(ro - hitPos), hitPos, hitNorm, albedo, metallic, roughness, ao, skyboxSh);
     } else {
         return SampleSkybox(rd, skybox);
     }

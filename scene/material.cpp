@@ -39,17 +39,22 @@ void Material::CreateDescriptorSets(const VulkanReferences& ref, const vector<Sh
 
             // std::cout << "\t" << j << ":\t" << (int)param.type << std::endl;
 
+            uint bufIndex;
             switch (param.type) {
             case ShaderParameter::Type::UNIFORM:
-                assert(param.uniform.uniformBuffers->size() >= duplicationCount);
-                if (param.uniform.uniformBuffers->size() != duplicationCount) {
+                bufIndex = i;
+                if (param.uniform.uniformBuffers->size() < duplicationCount) {
+                    std::cerr << "Uniform Buffer Duplication Count is SMALLER than material's duplication count, re-using final UBO for all remaining duplications!!" << std::endl;
+                    bufIndex = std::min(i, param.uniform.uniformBuffers->size() - 1);
+                }
+                if (param.uniform.uniformBuffers->size() > duplicationCount) {
                     std::cerr << "Uniform Buffer Duplication Count is greater than material's duplication count, this is weird but COULD BE valid." << std::endl;
                 }
                 ss.push_back(
                     vk::DescriptorBufferInfo{
-                        .buffer = (*(param.uniform.uniformBuffers))[i].buffer,
+                        .buffer = (*param.uniform.uniformBuffers)[bufIndex].buffer,
                         .offset = 0,
-                        .range = (*(param.uniform.uniformBuffers))[i].bufferSize
+                        .range = (*(param.uniform.uniformBuffers))[bufIndex].bufferSize
                     }
                 );
                 ssWriters.push_back({

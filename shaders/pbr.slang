@@ -48,7 +48,7 @@ public float3 textureGammaCorrect(float3 texColor) {
     return pow(texColor, float3(2.2));
 }
 
-public float3 SamplePBR(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao, StructuredBuffer<float> skyboxSh) {
+float3 SamplePBR(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao, float3 diffuseConvolutionSample) {
     float3 Lo = float3(0.);
     Lo += 0.03 * ao * albedo; // Ambient Light
 
@@ -85,10 +85,18 @@ public float3 SamplePBR(float3 wo, float3 worldPos, float3 norm, float3 albedo, 
         Lo += kd * fLambert * Li * lambert; // Diffuse
     }
 
-    if(norm.y >= 0.99) {
+    if (norm.y >= 0.99) {
         // TODO: temp debug del
         albedo.r *= 4.;
     }
 
-    return SampleSh(norm, skyboxSh, 0) * INVPI * albedo;
+    return diffuseConvolutionSample * INVPI * albedo;
+}
+
+public float3 SamplePBRSky(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao, StructuredBuffer<float> skyboxSh) {
+    return SamplePBR(wo, worldPos, norm, albedo, metallic, roughness, ao, SampleSh(norm, skyboxSh, 0));
+}
+
+public float3 SamplePBREnv(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao, StructuredBuffer<float> sh, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
+    return SamplePBR(wo, worldPos, norm, albedo, metallic, roughness, ao, SampleInterpolatedSh(norm, worldPos, sh, probeLayout));
 }
