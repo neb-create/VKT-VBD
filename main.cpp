@@ -943,7 +943,7 @@ private:
         UpdateUniformBuffer(0);
         pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao);
         skySh = pc.BakeAndSetSkyboxProbe();
-        envSh = std::move(pc.BakeEnvironmentProbes(uvec3(160, 20, 160), vec3(0), vec3(15.5,9,15.5)));
+        envSh = std::move(pc.BakeEnvironmentProbes(uvec3(40, 10, 40), vec3(0), vec3(15.5,9,15.5)));
         //writeToCubemap();
         vector materialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),

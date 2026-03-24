@@ -94,6 +94,11 @@ void ProbeCreator::AccumulateScratchIntoBuffer(WBuffer* buf, vk::DeviceSize dstO
 	}
 	receiveBuffer.UnmapMemory();
 
+	// Divide by monte carlo count
+	for (int i = 0; i < 27; i++) {
+		sh[i] /= (1.0f * SQRT_SAMPLE_COUNT * SQRT_SAMPLE_COUNT);
+	}
+
 	// Create return buffer
 	buf->SetData(*ref, sh.data(), 27 * sizeof(float), dstOffset);
 }
@@ -119,7 +124,7 @@ void ProbeCreator::BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::D
 
 	// Dispatch
 	computeDispatcher.StartRecord(*ref);
-	bakeEnvironmentProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_THREAD_COUNT, SQRT_THREAD_COUNT, 1)); // TODO: would need atomics to easily do multiple probes at once
+	bakeEnvironmentProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_SAMPLE_COUNT, SQRT_SAMPLE_COUNT, 1)); // TODO: would need atomics to easily do multiple probes at once
 	computeDispatcher.FinishRecordSubmit(*ref, true);
 	
 	// Accumulate into it
@@ -182,7 +187,7 @@ uPtr<ProbeVolume> ProbeCreator::BakeEnvironmentProbes(glm::uvec3 probeCounts, ve
 WBuffer* ProbeCreator::BakeAndSetSkyboxProbe() {
 	// Dispatch
 	computeDispatcher.StartRecord(*ref);
-	bakeSkyboxProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_THREAD_COUNT, SQRT_THREAD_COUNT, 1));
+	bakeSkyboxProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_SAMPLE_COUNT, SQRT_SAMPLE_COUNT, 1));
 	computeDispatcher.FinishRecordSubmit(*ref, true);
 
 	AccumulateScratchIntoBuffer(skyboxSh.get(), 0);

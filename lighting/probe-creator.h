@@ -44,8 +44,8 @@ private:
 };
 
 // need to change spherical harmonic shader (how to flatten group id & thread id) as well as sampling shader (how much to divide sh sample, or just do it when cpu accuming) if you change this
-constexpr uint32_t SQRT_THREAD_COUNT = 128; // Sqrt Sample Count
+constexpr uint32_t SQRT_SAMPLE_COUNT = 256; // Sqrt Sample Count
 constexpr uint32_t SQRT_THREADS_PER_GROUP = 8;
 
-constexpr uint32_t GROUP_COUNT = (SQRT_THREAD_COUNT / SQRT_THREADS_PER_GROUP) * (SQRT_THREAD_COUNT / SQRT_THREADS_PER_GROUP);
+constexpr uint32_t GROUP_COUNT = (SQRT_SAMPLE_COUNT / SQRT_THREADS_PER_GROUP) * (SQRT_SAMPLE_COUNT / SQRT_THREADS_PER_GROUP);
 constexpr vk::DeviceSize SCRATCH_BUFFER_SIZE = GROUP_COUNT * sizeof(float) * 3 * 9; // Each group gets its own SH, non-atomic
