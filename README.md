@@ -73,3 +73,12 @@ Can bake  -->
 80x10x80 probe grid w/o skybox
 
 Need to do probe visibility checking & optimize probe bake compute shader, likely through BVH and parallelization.
+
+---
+## 3/26/2026 Update
+
+![](ShowcaseMedia/cameraAndGameObjects.gif)
+
+- Camera Controller
+- UI Integration
+- Uniform Ring Buffer for multiple game objects being stored optimally in same material
