@@ -264,7 +264,7 @@ void WTexture::TransitionImageLayoutHardcodedEnqueue(CommandBuffer* cmd, const V
         throw std::invalid_argument("unsupported layout transition");
     }
 
-    cmd->pipelineBarrier(srcStage, dstStage, {}, {}, nullptr, barrier);
+    cmd->pipelineBarrier(srcStage, dstStage, {}, {}, nullptr, barrier); // TODO: make static one so rendertarget doesnt need tex
 }
 
 void WTexture::TransitionImageLayoutHardcoded(const VulkanReferences& ref, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {

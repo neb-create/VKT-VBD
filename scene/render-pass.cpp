@@ -5,8 +5,10 @@ void WRenderPass::Create(const VulkanReferences& ref) {
     this->drawFence = vk::raii::Fence(ref.device, vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
 }
 
-void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd) {
-    WaitForFinish();
+void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd, bool waitForPrevFinish) {
+    if (waitForPrevFinish) {
+        WaitForFinish();
+    }
     ref->device.resetFences(*drawFence);
 
     currCmd = cmd;
@@ -29,10 +31,10 @@ void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd) {
     // doing this makes the entire cubemap texture look horrible for some reason, it should be redundant (texture creation already transitions) but idk why it's bad, idk why, maybe ask taaron
 
     // Transition the depth image to its optimal (from whatever it was we dont care)
-    if (target->depthTex) {
+    if (target->depthImg) {
         WTexture::TransitionImageLayout(
             *currCmd,
-            *target->depthTex->image,
+            *target->depthImg,
             vk::ImageLayout::eUndefined,
             vk::ImageLayout::eDepthAttachmentOptimal,
             vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -53,7 +55,7 @@ void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd) {
     };
 
     vk::RenderingAttachmentInfo depthAttachmentInfo;
-    if (target->depthTex) {
+    if (target->depthImg) {
         vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
         depthAttachmentInfo = {
             .imageView = *target->depthView,
@@ -65,12 +67,12 @@ void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd) {
     }
 
     vk::RenderingInfo renderingInfo = {
-        .renderArea = {.offset = {0,0}, .extent = {target->colorTex->width, target->colorTex->height} },
+        .renderArea = {.offset = {0,0}, .extent = {target->dim.x, target->dim.y} },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachmentInfo, // Which color attachments we rendering to?
 
-        .pDepthAttachment = target->depthTex ? &depthAttachmentInfo : nullptr,
+        .pDepthAttachment = target->depthImg ? &depthAttachmentInfo : nullptr,
     };
 
     // All record cmds return void so no error handling til we finished recording
@@ -78,8 +80,8 @@ void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd) {
     currCmd->setPrimitiveRestartEnable(true); // TODO: check if necessary, we used this for getting prim index
 
     // Assuming pipeline has viewport and scissor as dynamic render-time specified
-    currCmd->setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(target->colorTex->width), static_cast<float>(target->colorTex->height), 0.0f, 1.0f));
-    currCmd->setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), { target->colorTex->width, target->colorTex->height }));
+    currCmd->setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(target->dim.x), static_cast<float>(target->dim.y), 0.0f, 1.0f));
+    currCmd->setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), { target->dim.x, target->dim.y }));
 }
 
 void WRenderPass::EnqueueSetMaterial(const Material& mat) {
@@ -94,17 +96,22 @@ void WRenderPass::EnqueueDraw(const Mesh& mesh) {
 }
 
 // TODO: also a transition for depth maybe?
-void WRenderPass::FinishExecute(vk::ImageLayout postTargetColorLayout, bool waitForFinish) {
+void WRenderPass::FinishExecute(vk::ImageLayout postTargetColorLayout, bool waitForFinish, vk::raii::Semaphore* waitSemaphore, vk::raii::Semaphore* signalSemaphore) {
     currCmd->endRendering();
     target->colorTex->TransitionImageLayoutHardcodedEnqueue(currCmd, *ref, vk::ImageLayout::eColorAttachmentOptimal, postTargetColorLayout);
     currCmd->end();
 
     vk::PipelineStageFlags waitDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
     const vk::SubmitInfo submitInfo = {
+            .waitSemaphoreCount = waitSemaphore == nullptr ? 0u : 1u,
+            .pWaitSemaphores = waitSemaphore == nullptr ? nullptr : &**waitSemaphore,
             .pWaitDstStageMask = &waitDstStageMask,
 
             .commandBufferCount = 1,
             .pCommandBuffers = &**currCmd,
+
+            .signalSemaphoreCount = signalSemaphore == nullptr ? 0u : 1u,
+            .pSignalSemaphores = signalSemaphore == nullptr ? nullptr : &**signalSemaphore
     };
     ref->graphicsQueue.submit(submitInfo, *drawFence);
 
@@ -117,5 +124,11 @@ void WRenderPass::FinishExecute(vk::ImageLayout postTargetColorLayout, bool wait
 }
 
 void WRenderPass::WaitForFinish() {
-    while (ref->device.waitForFences(*drawFence, vk::True, UINT64_MAX) == vk::Result::eTimeout) {}
+    vk::Result res;
+    do {
+        res = ref->device.waitForFences(*drawFence, vk::True, UINT64_MAX);
+        if (res != vk::Result::eTimeout && res != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to wait for WRenderPass::WaitForFinish() fence");
+        }
+    } while (res == vk::Result::eTimeout);
 }

@@ -3,7 +3,9 @@
 #include "defines.h"
 #include "scene/buffer.h"
 #include <string>
+#include "glm/glm.hpp"
 
+using namespace glm;
 using namespace vk::raii;
 
 class WTexture {
@@ -25,6 +27,7 @@ public:
         vk::ImageUsageFlags usage,
         vk::MemoryPropertyFlags properties, vk::ImageAspectFlags imageViewAspectFlags = vk::ImageAspectFlagBits::eColor,
         uint32_t arrayLayerCount = 1, bool cubeMap = false);
+    void CreateFromExternalImage(const VulkanReferences& ref, const Image&, const ImageView&, uvec2 dim);
 
     void CopyFromBuffer(const VulkanReferences& ref, const WBuffer& buffer, vk::DeviceSize bufferOffset = 0, uint32_t arrayLayer = 0);
     void TransitionImageLayoutHardcoded(const VulkanReferences& ref, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);

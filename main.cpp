@@ -904,6 +904,18 @@ private:
         // ImGui::ShowDemoWindow();
     }
 
+    vector<WRenderPass> renderPasses;
+    vector<RenderTarget> renderTargets;
+    void CreateRenderPassesAndTargets() {
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            renderPasses.emplace_back();
+            renderPasses[i].Create(coreReferences);
+
+            renderTargets.emplace_back();
+            renderTargets[i].CreateFromTexture()
+        }
+    }
+
     WBuffer* skySh;
     uPtr<ProbeVolume> envSh;
     ProbeCreator pc;
@@ -925,6 +937,8 @@ private:
 
         CreateDepthResources();
         CreateDescriptorPool();
+
+        CreateRenderPassesAndTargets();
 
         GUIManager::Initialize(
             window, *instance, 
@@ -1136,19 +1150,21 @@ private:
         auto& drawFence = drawFences[currFrameIndex];
         auto& presentCompleteSemaphore = presentCompleteSemaphores[currFrameIndex];
         auto& commandBuffer = commandBuffers[currFrameIndex];
+        auto& renderPass = renderPasses[currFrameIndex];
 
         // Wait until prev frame finished
         // Takes in array of fences, true indicates we want to wait for all of em, UINT64_MAX is the timeout, effectively disabled
-        auto fenceResult = coreReferences.device.waitForFences(*drawFence, vk::True, UINT64_MAX);
+        /*auto fenceResult = coreReferences.device.waitForFences(*drawFence, vk::True, UINT64_MAX);
         if (fenceResult != vk::Result::eSuccess) {
             throw new std::runtime_error("Failed to wait for fence");
-        }
+        }*/
+        renderPass.WaitForFinish();
 
         UpdateUniformBuffer(currFrameIndex);
 
         // Grab img from framebuffer now that prev frame done
         // presentCompleteSemaphore is signaled when image is finished being used
-        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr); // Signal presentCompleteSemaphore
         if (result == vk::Result::eErrorOutOfDateKHR) { // frameBufferResized just in case app doesn't automatically do outOfDate
             RecreateSwapChain();
             return;
@@ -1157,10 +1173,13 @@ private:
             throw new std::runtime_error("Failed to acquire swap chain img");
         }
 
+        auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex]; // This semaphore is per image because if it was per frame, a different frame in flight could be using a different semaphore on an image that hasn't finished being rendered to, since the semaphore would be different, it'd go through and we'd overwrite the image being drawn to
+
+        renderPass.Start()
+
         // We know we're not returning early, so put the fence back up so it'll be signaled on draw
         coreReferences.device.resetFences(*drawFence); // Put fence back up
 
-        auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex]; // This semaphore is per image because if it was per frame, a different frame in flight could be using a different semaphore on an image that hasn't finished being rendered to, since the semaphore would be different, it'd go through and we'd overwrite the image being drawn to
 
         // Record drawing cmds
         commandBuffer.reset();

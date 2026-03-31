@@ -11,8 +11,10 @@ public:
 	// void Create(uvec2 dim); will create textures first, for deferred rendering, but then we're actually OWNING the image so we'll need to create a texture (uPtr Texture = nullptr)
 private:
 	friend class WRenderPass;
-	WTexture* colorTex;
-	WTexture* depthTex;
+	vk::raii::Image* colorImg;
+	vk::raii::Image* depthImg;
+
+	uvec2 dim;
 
 	vk::raii::ImageView* colorView;
 	vk::raii::ImageView* depthView;
