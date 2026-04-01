@@ -100,6 +100,7 @@ private:
     bool frameBufferResized = false;
 
     Mesh blobMesh;
+    Mesh sphereMesh;
     Mesh chairMesh;
     Mesh cubeMesh;
     Mesh testRoom;
@@ -110,6 +111,7 @@ private:
     Material testMaterial;
     Material afterMaterial;
     Material blobMaterial;
+    Material probeOrbMaterial;
 
     WTexture whiteTexture;
 
@@ -532,119 +534,6 @@ private:
         commandBuffers = vk::raii::CommandBuffers(coreReferences.device, allocateInfo);
     }
 
-    void RecordCommandBuffer(vk::raii::CommandBuffer& commandBuffer, uint32_t imageIndex, uint32_t frameIndex) {
-        // if cmd buffer already was recorded, beginning will reset it.  we can't append once we record a cmd buffer, only reset
-        commandBuffer.begin({}); // could put flags in here
-
-        // Transition to COLOR ATTACHMENT OPTIMAL
-        WTexture::TransitionImageLayout(
-            commandBuffer,
-            swapChainImages[imageIndex],
-            vk::ImageLayout::eUndefined, // From any?
-            vk::ImageLayout::eColorAttachmentOptimal, // To this format
-            {}, // What access to wait for?  We don't wanna wait for anything
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::ImageAspectFlagBits::eColor, 1);
-
-        // Transition the depth image to its optimal (from whatever it was we dont care)
-        WTexture::TransitionImageLayout(
-            commandBuffer,
-            *depthTexture.image,
-            vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eDepthAttachmentOptimal,
-            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            vk::ImageAspectFlagBits::eDepth, 1
-        );
-
-        vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
-        vk::RenderingAttachmentInfo colorAttachmentInfo = {
-            .imageView = swapChainImageViews[imageIndex],
-            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .loadOp = vk::AttachmentLoadOp::eClear, // what to do before rendering?
-            .storeOp = vk::AttachmentStoreOp::eStore, // what to do after rendering?
-            .clearValue = clearColor
-        };
-
-        vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
-        vk::RenderingAttachmentInfo depthAttachmentInfo = {
-            .imageView = depthTexture.view,
-            .imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
-            .loadOp = vk::AttachmentLoadOp::eClear,
-            .storeOp = vk::AttachmentStoreOp::eDontCare, // no need to keep depth
-            .clearValue = clearDepth
-        };
-
-        vk::RenderingInfo renderingInfo = {
-            .renderArea = {.offset = {0,0}, .extent = swapChainExtent},
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &colorAttachmentInfo, // Which color attachments we rendering to?
-
-            .pDepthAttachment = &depthAttachmentInfo,
-        };
-
-        // START RENDER
-        // All record cmds return void so no error handling til we finished recording
-        commandBuffer.beginRendering(renderingInfo);
-
-        // For getting prim index
-        commandBuffer.setPrimitiveRestartEnable(true);
-
-        // remember in the pipeline we specified viewport and scissor state as dynamic, so we gotta specify them now
-        commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(swapChainExtent.width), static_cast<float>(swapChainExtent.height), 0.0f, 1.0f));
-        commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent));
-
-        // Skybox
-        skyboxShader.Bind(commandBuffer);
-        skyboxShader.BindMaterialDescriptorSets(coreReferences, commandBuffer, skyboxMaterial, frameIndex); 
-        commandBuffer.bindVertexBuffers(0, *(cubeMesh.vertexBuffer.buffer), { 0 });
-        commandBuffer.bindIndexBuffer(*cubeMesh.indexBuffer.buffer, 0, vk::IndexType::eUint32);
-        commandBuffer.drawIndexed(cubeMesh.indexCount, 1, 0, 0, 0);
-
-        // Bind Pipeline & Material
-        shaderPipeline.Bind(commandBuffer);
-        shaderPipeline.BindMaterialDescriptorSets(coreReferences, commandBuffer, testMaterial, frameIndex, { 0 });
-        
-        // Bind Mesh
-        commandBuffer.bindVertexBuffers(0, *(testRoom.vertexBuffer.buffer), { 0 }); // Bind buffer to our binding which has layout and stride stuff {0} is array of vertex buffers to bind
-        commandBuffer.bindIndexBuffer(*(testRoom.indexBuffer.buffer), 0, vk::IndexType::eUint32);
-        
-        // IndexCount, InstanceCount, IndexBufferOffset, VertexBufferOffset, InstanceOffset
-        commandBuffer.drawIndexed(testRoom.indexCount, 1, 0, 0, 0);
-
-        // Draw orb
-        // shaderPipeline.Bind(commandBuffer);
-        shaderPipeline.BindMaterialDescriptorSets(coreReferences, commandBuffer, blobMaterial, frameIndex, { 1 });
-        commandBuffer.bindVertexBuffers(0, *(blobMesh.vertexBuffer.buffer), { 0 });
-        commandBuffer.bindIndexBuffer(*(blobMesh.indexBuffer.buffer), 0, vk::IndexType::eUint32);
-        commandBuffer.drawIndexed(blobMesh.indexCount, 1, 0, 0, 0);
-
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), *commandBuffer);
-
-        commandBuffer.endRendering();
-        // END RENDER
-
-        // Have to transition image layout to presentable format
-        WTexture::TransitionImageLayout( // todo: trans in finishexec and check hardcoded same
-            commandBuffer,
-            swapChainImages[imageIndex],
-            vk::ImageLayout::eColorAttachmentOptimal,
-            vk::ImageLayout::ePresentSrcKHR,
-            vk::AccessFlagBits2::eColorAttachmentWrite, // We wanna wait for writing ops
-            {},
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eBottomOfPipe,
-            vk::ImageAspectFlagBits::eColor, 1);
-
-        commandBuffer.end();
-
-    }
-
     void CreateSyncObjects() {
         assert(
             presentCompleteSemaphores.empty() &&
@@ -900,8 +789,11 @@ private:
         pass.FinishExecute(true, vk::ImageLayout::eShaderReadOnlyOptimal);
     }
 
+    bool showDebugProbes;
     void DebugUI() {
-        // ImGui::ShowDemoWindow();
+        ImGui::Begin("Main Window");
+        ImGui::Checkbox("Debug Probes", &showDebugProbes);
+        ImGui::End();
     }
 
     vector<WRenderPass> renderPasses;
@@ -943,9 +835,9 @@ private:
         CreateRenderPassesAndTargets();
 
         GUIManager::Initialize(
-            window, *instance, 
-            *coreReferences.physicalDevice, *coreReferences.device, 
-            graphicsAndComputeIndex, *coreReferences.graphicsQueue, 
+            window, *instance,
+            *coreReferences.physicalDevice, *coreReferences.device,
+            graphicsAndComputeIndex, *coreReferences.graphicsQueue,
             *coreReferences.descriptorPool, MAX_FRAMES_IN_FLIGHT,
             static_cast<VkFormat>(swapSurfaceFormat.format), static_cast<VkFormat>(GetDepthFormat())
         );
@@ -954,6 +846,7 @@ private:
 
         // Other stuff
         blobMesh.CreateFromFile(coreReferences, "models/blob.obj", true);
+        sphereMesh.CreateFromFile(coreReferences, "models/smoothSphere.obj", true);
         chairMesh.CreateFromFile(coreReferences, "models/morrisChair.obj", true);
         cubeMesh.CreateFromFile(coreReferences, "models/cube.obj");
         testRoom.CreateFromFile(coreReferences, "models/testRoom.obj", true);
@@ -971,17 +864,7 @@ private:
             "textures/envmaps/storforsen/negy.jpg",
             "textures/envmaps/storforsen/posz.jpg",
             "textures/envmaps/storforsen/negz.jpg"
-            /*"textures/envmaps/stormydays/stormydays_lf.tga",
-            "textures/envmaps/stormydays/stormydays_rt.tga",
-            "textures/envmaps/stormydays/stormydays_up.tga",
-            "textures/envmaps/stormydays/stormydays_dn.tga",
-            "textures/envmaps/stormydays/stormydays_ft.tga",
-            "textures/envmaps/stormydays/stormydays_bk.tga"*/
             }, vk::Format::eR8G8B8A8Srgb);
-        /*CreateTextureImage(testTexture, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");
-        CreateTextureImage(metallic, "textures/chair/morrisChair_bigChairMat_Metallic.tga.png");
-        CreateTextureImage(roughness, "textures/chair/morrisChair_bigChairMat_Roughness.tga.png");
-        CreateTextureImage(ao, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png");*/
         testRoomTexture.CreateFromFile(coreReferences, "textures/testGiPicture.png", vk::Format::eR8G8B8A8Srgb);
 
         vector skyboxShaderParams = {
@@ -1014,7 +897,7 @@ private:
         UpdateUniformBuffer(0);
         pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao);
         skySh = pc.BakeAndSetSkyboxProbe();
-        envSh = std::move(pc.BakeEnvironmentProbes(uvec3(4,2,4), vec3(0), vec3(15.5,9,15.5)));
+        envSh = std::move(pc.BakeEnvironmentProbes(uvec3(14, 7, 14), vec3(0), vec3(15.5, 9, 15.5)));
         //writeToCubemap();
         vector materialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
@@ -1023,7 +906,7 @@ private:
                 .singleObjectSize =
                 static_cast<vk::DeviceSize>(
                     ceilToNearest(
-                        sizeof(UEntity), 
+                        sizeof(UEntity),
                         coreReferences.minUniformBufferOffsetAlignment
                     )
                 )
@@ -1039,6 +922,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &envSh->probeLayoutUBO}),
         };
         testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
+
         vector blobMaterialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
             ShaderParameter::MParameter(ShaderParameter::UDynamicUniform {
@@ -1046,7 +930,7 @@ private:
                 .singleObjectSize =
                 static_cast<vk::DeviceSize>(
                     ceilToNearest(
-                        sizeof(UEntity), 
+                        sizeof(UEntity),
                         coreReferences.minUniformBufferOffsetAlignment
                     )
                 )
@@ -1062,6 +946,14 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &envSh->probeLayoutUBO}),
         };
         blobMaterial.Create(&shaderPipeline, coreReferences, blobMaterialParams);
+
+        vector probeMaterialParams = blobMaterialParams;
+        probeMaterialParams[1] = ShaderParameter::MParameter(ShaderParameter::UDynamicUniform{
+                .buffers = envSh->CreateEntityListUBO(coreReferences),
+                .singleObjectSize = GetUniformAlignment<UEntity>(coreReferences)
+            });
+        probeOrbMaterial.Create(&shaderPipeline, coreReferences, probeMaterialParams);
+
         vector reflectShaderParams = {
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
@@ -1105,7 +997,7 @@ private:
     }
 
     void UpdateUniformBuffer(uint32_t currFrame) {
-        vk::DeviceSize alignment = ceilToNearest(sizeof(UEntity), coreReferences.minUniformBufferOffsetAlignment);
+        vk::DeviceSize alignment = GetUniformAlignment<UEntity>(coreReferences);// ceilToNearest(sizeof(UEntity), coreReferences.minUniformBufferOffsetAlignment);
         vector<UEntity> entities = {
             {.transform = game.roomTransform},
             {.transform = game.ballTransform}
@@ -1117,13 +1009,9 @@ private:
         UniformBufferObject ubo = {
             .off = time,
             .model = glm::scale(mat4(1.0f), vec3(0.014f+0.5)) * glm::rotate(mat4(1.0f), 0*time + glm::radians(0.0f), vec3(0.0f, 1.0f, 0.0f)),
-            .view = camera.GetViewMatrix(),//glm::lookAt(mat3(glm::rotate(mat4(1.0f), time, vec3(0,1,0))) * vec3(0,2,5), vec3(0), vec3(0,1,0)),
-            .proj = camera.GetProjectionMatrix(),//glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 1000.0f), // TODO: increase far
+            .view = camera.GetViewMatrix(),
+            .proj = camera.GetProjectionMatrix(),
         };
-        /*ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f) * 0.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = lookAt(glm::vec3(4.0f * cos(time), 1.2f, 4.0f * sin(time)), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
-        */// glm::perspective outputs flipped y clip space, compensate
         ubo.proj[1][1] *= -1.0f;
 
         // TODO: how are we sure that the uniform buffer does get written to after this?  i think vulkan actually ensures the cpu data is same when mapped?
@@ -1140,7 +1028,7 @@ private:
         // Semaphore enforces synchronization btwn 2 queue ops
         // Forces one queue op (the wait) to wait for another queue op (the signal) to finish
         // Once (the wait) finishes, signal turns back off to allow this process to happen again
-        // Semaphores enforce gpu waiting, but how to do CPU waiting?
+        // Semaphores enforce gpu waiting, but how to do CPU waiting? Fences
 
         // Fence synchronizes execution on CPU, we can wait on GPU ops
         // Create a fence, make queue op signal fence, and call a wait for fence signal func on cpu
@@ -1148,18 +1036,11 @@ private:
 
         // Semaphores preferably since we don't block host
 
-
         auto& drawFence = drawFences[currFrameIndex];
         auto& presentCompleteSemaphore = presentCompleteSemaphores[currFrameIndex];
         auto& commandBuffer = commandBuffers[currFrameIndex];
         auto& renderPass = renderPasses[currFrameIndex];
 
-        // Wait until prev frame finished
-        // Takes in array of fences, true indicates we want to wait for all of em, UINT64_MAX is the timeout, effectively disabled
-        /*auto fenceResult = coreReferences.device.waitForFences(*drawFence, vk::True, UINT64_MAX);
-        if (fenceResult != vk::Result::eSuccess) {
-            throw new std::runtime_error("Failed to wait for fence");
-        }*/
         renderPass.WaitForFinish();
 
         UpdateUniformBuffer(currFrameIndex);
@@ -1178,37 +1059,20 @@ private:
         auto& renderTarget = renderTargets[imageIndex];
         auto& renderFinishedSemaphore = renderFinishedSemaphores[imageIndex]; // This semaphore is per image because if it was per frame, a different frame in flight could be using a different semaphore on an image that hasn't finished being rendered to, since the semaphore would be different, it'd go through and we'd overwrite the image being drawn to
 
-        
-
-        // We know we're not returning early, so put the fence back up so it'll be signaled on draw
-        //coreReferences.device.resetFences(*drawFence); // Put fence back up
-
         renderPass.Start(&renderTarget, &commandBuffer, false); // bit dangerous; pointers to vector elems
+
         renderPass.EnqueueSetMaterial(skyboxMaterial, currFrameIndex);
         renderPass.EnqueueDraw(cubeMesh);
         renderPass.EnqueueSetMaterial(testMaterial, currFrameIndex, { 0 });
         renderPass.EnqueueDraw(testRoom);
         renderPass.EnqueueSetMaterial(blobMaterial, currFrameIndex, { 1 });
         renderPass.EnqueueDraw(blobMesh);
-        //// Record drawing cmds
-        //commandBuffer.reset();
-        //RecordCommandBuffer(commandBuffer, imageIndex, currFrameIndex);
+
+        if (showDebugProbes) {
+            envSh->DrawDebugProbeVolume(&renderPass, sphereMesh, probeOrbMaterial, currFrameIndex);
+        }
 
         renderPass.FinishExecute(false, vk::ImageLayout::ePresentSrcKHR, &presentCompleteSemaphore, &renderFinishedSemaphore);
-        //vk::PipelineStageFlags waitDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-        //const vk::SubmitInfo submitInfo = {
-        //    .waitSemaphoreCount = 1,
-        //    .pWaitSemaphores = &*presentCompleteSemaphore, // Wait for this semaphore to signal
-        //    .pWaitDstStageMask = &waitDstStageMask, // Write colors
-
-        //    .commandBufferCount = 1,
-        //    .pCommandBuffers = &*commandBuffer, // Submit this cmd buffer
-
-        //    .signalSemaphoreCount = 1,
-        //    .pSignalSemaphores = &*renderFinishedSemaphore // Signal once done
-        //};
-
-        //coreReferences.graphicsQueue.submit(submitInfo, *drawFence); // Fence will be put down when done
 
         const vk::PresentInfoKHR presentInfoKHR = {
             .waitSemaphoreCount = 1,

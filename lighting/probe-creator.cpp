@@ -2,6 +2,49 @@
 #include <iostream>
 #include "helper/math.h"
 
+// Assume no other dynamic offs in mat
+void ProbeVolume::DrawDebugProbeVolume(WRenderPass* renderPass, const Mesh& probeMesh, const Material& mat, uint32_t setIndex) {
+	uint32_t count = probeCounts.x * probeCounts.y * probeCounts.z;
+
+	for (uint32_t i = 0; i < count; i++) {
+		renderPass->EnqueueSetMaterial(mat, setIndex, { i });
+		renderPass->EnqueueDraw(probeMesh);
+	}
+}
+
+/// buf should exist but not have Create() run on it
+vector<WBuffer>* ProbeVolume::CreateEntityListUBO(const VulkanReferences& ref) {
+	uint32_t count = probeCounts.x * probeCounts.y * probeCounts.z;
+
+	// Create entity structs
+	vector<UEntity> entities(count);
+	for (int k = 0; k < probeCounts.z; k++) {
+		for (int j = 0; j < probeCounts.y; j++) {
+			for (int i = 0; i < probeCounts.x; i++) {
+				vec3 uv = vec3(i, j, k) / (vec3(probeCounts) - vec3(1));
+				vec3 pos = vec3(transform * vec4(uv, 1));
+				entities[k * probeCounts.x * probeCounts.y + j * probeCounts.x + i] = {
+					.transform = glm::translate(mat4(1.0f), pos) * glm::scale(mat4(1.0f), vec3(0.25f))
+				};
+			}
+		}
+	}
+
+	// Create aligned buffer
+	vk::DeviceSize alignment = GetUniformAlignment<UEntity>(ref);
+	probeEntityUBO.emplace_back();
+	WBuffer* buf = &probeEntityUBO[0];
+	buf->Create(ref, alignment * count, vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
+	char* bufData = static_cast<char*>(buf->MapMemory());
+
+	// Copy to buffer
+	for (int i = 0; i < count; i++) {
+		memcpy(bufData + i * alignment, &entities[i], sizeof(UEntity));
+	}
+
+	return &probeEntityUBO;
+}
+
 struct UProbePosition {
 	alignas(16) vec3 probePos;
 };
@@ -147,6 +190,7 @@ uPtr<ProbeVolume> ProbeCreator::BakeEnvironmentProbes(glm::uvec3 probeCounts, ve
 
 	// Parameters
 	probeVolume->probeCounts = probeCounts;
+	probeVolume->transform = transform;
 	probeVolume->invTransform = glm::inverse(transform);
 
 	// Create Uniform

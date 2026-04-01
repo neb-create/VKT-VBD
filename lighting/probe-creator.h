@@ -5,16 +5,26 @@
 #include "scene/compute-dispatcher.h"
 #include "scene/pipeline.h"
 #include "scene/mesh.h"
+#include "scene/material.h"
+#include "core/memory-helper.h"
+#include "scene/render-pass.h"
 
 using namespace glm;
 
 struct ProbeVolume {
 	WBuffer shCoefficients;
 	glm::uvec3 probeCounts;
+	glm::mat4 transform;
 	glm::mat4 invTransform; // to (0, 1)
-	vector<WBuffer> probeLayoutUBO; // shouldn't have to be vector TODO: uniform stuff
+	vector<WBuffer> probeLayoutUBO;
 	// TODO: octahedral depth map atlas here with gutter which will be filled in post process step
-}; // TODO: use
+	WTexture octahedralDepthMap;
+
+	vector<WBuffer> probeEntityUBO;
+
+	void DrawDebugProbeVolume(WRenderPass*, const Mesh& probeMesh, const Material&, uint32_t setIndex);
+	vector<WBuffer>* CreateEntityListUBO(const VulkanReferences& ref);
+};
 
 class ProbeCreator {
 public:

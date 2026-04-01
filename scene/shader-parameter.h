@@ -46,6 +46,8 @@ namespace ShaderParameter {
 		inline MParameter(UDynamicUniform u) : type(Type::DYNAMIC_UNIFORM), dynamicUniform(u) {}
 		inline MParameter(USampler s) : type(Type::SAMPLER), sampler(s) {}
 		inline MParameter(UBuffer b) : type(Type::BUFFER), buffer(b) {}
+
+		// inline ~MParameter() {}
 	};
 
 	struct SParameter {
