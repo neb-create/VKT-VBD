@@ -33,8 +33,8 @@ public:
 	uPtr<ProbeVolume> probeVolume;
 private:
 	void BakeEnvironmentProbes(glm::uvec3 probeCounts, mat4 transform);
+
 	WBuffer* BakeAndSetSkyboxProbe();
-	// void BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset);
 	void AccumulateScratchIntoBuffer(WBuffer* buf, vk::DeviceSize offset);
 	void ZeroOutScratchBuffer();
 

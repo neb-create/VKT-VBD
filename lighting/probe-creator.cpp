@@ -184,55 +184,12 @@ void ProbeCreator::ZeroOutScratchBuffer() {
 	shScratchBuffer.CopyFrom(*ref, zeroBuffer, SCRATCH_BUFFER_SIZE);
 }
 
-// TODO: expand scratch buffer to bake multiple at once using the same scratch buffer
-//void ProbeCreator::BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset) {
-//	// TODO: until we decouple compute material and pipeline (compute material either inherits or is straight up equal to material for now), just do skybox ignore pos
-//	// well actually we dont decouple until we do stuff in parallel, for now and for a while just vary some uniform buffer that contains position and do one at a time..
-//	// scratch buffer makes doing stuff in parallel annoying anyways, atomic so much easier
-//	
-//	// Must have skybox baked to bake env
-//	assert(isSkyboxBaked);
-//
-//	// Update UBO
-//	UProbePosition probePosStruct = {
-//		.probePos = pos
-//	};
-//	memcpy(probePositionUBO[0].mappedMemory, &probePosStruct, sizeof(UProbePosition)); // Copy doesn't have to be 16-aligned, 4 byte padding can be trash
-//
-//	// Dispatch
-//	computeDispatcher.StartRecord(*ref);
-//	bakeEnvironmentProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_THREADS_PER_PASS, SQRT_THREADS_PER_PASS, 1)); // TODO: would need atomics to easily do multiple probes at once
-//	computeDispatcher.FinishRecordSubmit(*ref, true);
-//	
-//	// Accumulate into it
-//	AccumulateScratchIntoBuffer(shCoefficients, offset);
-//
-//	// Clear scratch
-//	ZeroOutScratchBuffer();
-//}
-
 void ProbeCreator::BakeEnvironmentProbes(glm::uvec3 probeCounts, mat4 transform) {
 	assert(isSkyboxBaked);
 
-	//// Bake all probes
-	//for (int k = 0; k < probeCounts.z; k++) {
-	//	for (int j = 0; j < probeCounts.y; j++) {
-	//		for (int i = 0; i < probeCounts.x; i++) {
-	//			vec3 uv = vec3(i, j, k) / (vec3(probeCounts)-vec3(1));
-	//			vec3 pos = transform * vec4(uv, 1.0);
-
-	//			vk::DeviceSize flattenedIndex = k * probeCounts.y * probeCounts.x + j * probeCounts.x + i;
-
-	//			BakeEnvironmentProbe(pos, &probeVolume->shCoefficients, flattenedIndex * shSize);
-
-	//			std::cout << "Baked Probe " << (flattenedIndex+1) << "/" << (probeCounts.x * probeCounts.y * probeCounts.z) << std::endl;
-	//		}
-	//	}
-	//}
-	
-	//
+	// Bake all probes
 	uint32_t probeCount = probeCounts.x * probeCounts.y * probeCounts.z;
-	uint32_t bakeCount = 1024; // TODO: make not hardcoded
+	uint32_t bakeCount = 4096; // TODO: need even more maybe or sh improvement
 	uint32_t groupCount = ceilDiv(probeCount, GROUP_SIZE);
 	std::cout << "Probe Count: " << probeCount << " Group Count: " << groupCount << std::endl;
 
