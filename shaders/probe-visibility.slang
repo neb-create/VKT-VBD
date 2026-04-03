@@ -13,7 +13,7 @@ public uint2 DirectionToTexel(float3 dir) {
 
     float2 uv = dir.xy;
     if (dir.z < 0.) {
-        uv = 1. - uv;
+        uv = float2(sign(uv.x), sign(uv.y)) * (1. - abs(uv));
     }
     uv = uv * 0.5 + 0.5;
 
@@ -36,4 +36,9 @@ public float3 TexelToDirection(uint2 texel) {
 public uint TexelToBufferIndices(uint probeID, uint2 texel) {
     uint texelID = texel.y * 16 + texel.x;
     return probeID * 512 + texelID * 2; // 2 Indices: (depth, weight), will be 3 later for depth^2
+}
+
+public float GetNormalizedDepth(uint probeID, uint2 texel, StructuredBuffer<float> depthBuffer) {
+    uint ind = TexelToBufferIndices(probeID, texel);
+    return depthBuffer[ind + 0] / depthBuffer[ind + 1];
 }

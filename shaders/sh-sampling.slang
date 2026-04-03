@@ -3,9 +3,9 @@ module SHSampling;
 #define PI 3.141592
 
 public struct UProbeVolumeLayout {
-    float4x4 invTransform;
-    float4x4 transform;
-    uint3 probeCounts;
+    public float4x4 invTransform; // TODO: make private, only public for debug purposes
+    public float4x4 transform;
+    public uint3 probeCounts;
 };
 
 uint probeIDToOffset(uint3 probeCounts, uint3 id) {

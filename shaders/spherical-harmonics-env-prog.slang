@@ -175,14 +175,12 @@ void main(uint3 id: SV_DispatchThreadID,
         for (int thread = 0; thread < 64; thread++) {
             float4 depthSample = sharedDepthSamples[thread];
             float3 rd = depthSample.xyz; float depth = depthSample.w;
-            int2 texel = int2(DirectionToTexel(rd));
+            int2 texel = int2(16)+int2(DirectionToTexel(rd));
 
             // Splat 5x5
             for (int y = -2; y <= 2; y++) {
-                if (texel.y + y < 0 || texel.y + y >= 16) continue;
                 for (int x = -2; x <= 2; x++) {
-                    int2 currTexel = texel + int2(x, y);
-                    if (currTexel.x < 0 || currTexel.x >= 16) continue;
+                    int2 currTexel = (texel + int2(x, y)) % int2(16);
 
                     float weight = pow(max(0., dot(rd, TexelToDirection(currTexel))), 8.);
 

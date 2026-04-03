@@ -108,10 +108,13 @@ private:
     vector<WBuffer> uniformBuffers; // Memory for each frame in flight so each frame can have diff uniform vals
     vector<WBuffer> uEntityBuffers;
 
+    ShaderPipeline depthOrbShader;
+
     Material testMaterial;
     Material afterMaterial;
     Material blobMaterial;
     Material probeOrbMaterial;
+    Material depthOrbMaterial;
 
     WTexture whiteTexture;
 
@@ -344,8 +347,10 @@ private:
             throw std::runtime_error("Couldn't find suitable GPU!");
         }
         coreReferences.physicalDevice = *devIter;
-        coreReferences.minUniformBufferOffsetAlignment = coreReferences.physicalDevice.getProperties().limits.minUniformBufferOffsetAlignment;
         physicalDeviceProperties = coreReferences.physicalDevice.getProperties();
+        coreReferences.minUniformBufferOffsetAlignment = physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
+        std::cout << "Max Texture Size: " << physicalDeviceProperties.limits.maxImageDimension2D << std::endl;
+        
         std::cout << "Max Compute Work Group Size: " << physicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << std::endl;
     }
 
@@ -894,7 +899,7 @@ private:
         // testGI();
         UpdateUniformBuffer(0);
         pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao,
-            uvec3(20, 10, 20), vec3(0), vec3(15.5, 9, 15.5));
+            uvec3(10, 5, 10), vec3(0), vec3(15.5, 9, 15.5));
         //skySh = pc.BakeAndSetSkyboxProbe();
         //envSh = std::move(pc.BakeEnvironmentProbes(uvec3(14, 7, 14), vec3(0), vec3(15.5, 9, 15.5)));
         //writeToCubemap();
@@ -953,30 +958,23 @@ private:
             });
         probeOrbMaterial.Create(&shaderPipeline, coreReferences, probeMaterialParams);
 
-        //vector reflectShaderParams = {
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //    ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
-        //};
-        //vector reflectMaterialParams = {
-        //    ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
-        //    ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
-        //    ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.vertexBuffer}),
-        //    ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
-        //    ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testRoomTexture}),
-        //    ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
-        //    ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
-        //    ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-        //    ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = skySh }) // TODO: modify samplepbr to interpolate between sh samples
-        //};
-        //reflectShader.Create(coreReferences, "shaders/reflect.spv", &swapSurfaceFormat.format, GetDepthFormat(), reflectShaderParams);
-        //reflectMaterial.Create(&reflectShader, coreReferences, reflectMaterialParams);
+        vector depthProbeShaderParams = {
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::DYNAMIC_UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+        };
+        vector depthProbeMaterialParams = {
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
+            ShaderParameter::MParameter(ShaderParameter::UDynamicUniform {
+                .buffers = &pc.probeVolume->probeEntityUBO,
+                .singleObjectSize = GetUniformAlignment<UEntity>(coreReferences)
+            }),
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &pc.probeVolume->probeLayoutUBO}),
+            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &pc.probeVolume->depthBuffer}),
+        };
+        depthOrbShader.Create(coreReferences, "shaders/display-probe-depth-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), depthProbeShaderParams);
+        depthOrbMaterial.Create(&depthOrbShader, coreReferences, depthProbeMaterialParams);
 
         // testCompute();
         
@@ -1068,7 +1066,7 @@ private:
         renderPass.EnqueueDraw(blobMesh);
 
         if (showDebugProbes) {
-            pc.probeVolume->DrawDebugProbeVolume(&renderPass, sphereMesh, probeOrbMaterial, currFrameIndex);
+            pc.probeVolume->DrawDebugProbeVolume(&renderPass, sphereMesh, depthOrbMaterial, currFrameIndex);
         }
 
         renderPass.FinishExecute(false, vk::ImageLayout::ePresentSrcKHR, &presentCompleteSemaphore, &renderFinishedSemaphore);

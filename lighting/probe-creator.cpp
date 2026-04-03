@@ -14,6 +14,9 @@ void ProbeVolume::DrawDebugProbeVolume(WRenderPass* renderPass, const Mesh& prob
 
 /// buf should exist but not have Create() run on it
 vector<WBuffer>* ProbeVolume::CreateEntityListUBO(const VulkanReferences& ref) {
+	if (probeEntityUBO.size() != 0) {
+		return &probeEntityUBO;
+	}
 	uint32_t count = probeCounts.x * probeCounts.y * probeCounts.z;
 
 	// Create entity structs
