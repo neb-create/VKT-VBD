@@ -9,11 +9,11 @@ public struct Vertex {
 };
 
 public float3 SampleSkybox(float3 rd, SamplerCube skybox) {
-    return 10. * float3(0.4, 0.5, 1.0);//10. * skybox.Sample(rd).rgb; // pow(skybox.Sample(rd).rgb,float3(2.2));  ;/
+    return .4 * float3(0.4, 0.5, 1.0);//10. * skybox.Sample(rd).rgb; // pow(skybox.Sample(rd).rgb,float3(2.2));  ;/
 }
 
 // For reflections, ro is position of first hitPos from camera (the frag pos), rd is reflected ray
-public float3 SampleEnvironment(float3 ro, float3 rd,
+public float4 SampleEnvironment(float3 ro, float3 rd,
         float4x4 model, // todo: inv transpose
         StructuredBuffer<Vertex> worldVertices,
         StructuredBuffer<uint32_t> worldIndices,
@@ -62,8 +62,8 @@ public float3 SampleEnvironment(float3 ro, float3 rd,
         float metallic = 0.;   // worldMetal.Sample(hitUv).r;
         float roughness = 0.2; // worldRoughness.Sample(hitUv).r;
         float ao = 0.;         // worldAO.Sample(hitUv).r;
-        return SamplePBRSky(normalize(ro - hitPos), hitPos, hitNorm, albedo, metallic, roughness, ao, skyboxSh);
+        return float4(SamplePBRSky(normalize(ro - hitPos), hitPos, hitNorm, albedo, metallic, roughness, ao, skyboxSh), minDist);
     } else {
-        return SampleSkybox(rd, skybox);
+        return float4(SampleSkybox(rd, skybox), 10000.0);
     }
 }

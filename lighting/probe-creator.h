@@ -19,6 +19,7 @@ struct ProbeVolume {
 	vector<WBuffer> probeLayoutUBO;
 	// TODO: octahedral depth map atlas here with gutter which will be filled in post process step
 	WTexture octahedralDepthMap;
+	WBuffer depthBuffer;
 
 	vector<WBuffer> probeEntityUBO;
 

@@ -1,6 +1,8 @@
 import Raytracing;
+import probe_visibility;
 
 groupshared float3[64][9] sharedCoefficients;
+groupshared float4[64] sharedDepthSamples;
 
 struct UniformBuffer {
     float off;
@@ -27,6 +29,7 @@ Sampler2D worldRoughness;
 Sampler2D worldAO;
 StructuredBuffer<float> skySh;
 RWStructuredBuffer<float> shCoefficients;
+RWStructuredBuffer<float> depthBuffer;
 ConstantBuffer<UProbeVolumeLayout> probeLayout;
 
 struct PushConstants {
@@ -107,7 +110,12 @@ void main(uint3 id: SV_DispatchThreadID,
 
     // Sample Li & Rd
     float3 rd = uniformSphere(float2(rngi(id.x - id.y + 525 + pushConstants.currGroup*23 - pushConstants.currBake*7), rngi(id.x + id.y + 525 - pushConstants.currGroup*15 + pushConstants.currBake*9)));
-    float3 li = SampleEnvironment(probePos, rd, ubo.model, worldVertices, worldIndices, worldTex, worldMetal, worldRoughness, worldAO, skySh, skybox);
+    float4 samp = SampleEnvironment(probePos, rd, ubo.model, worldVertices, worldIndices, worldTex, worldMetal, worldRoughness, worldAO, skySh, skybox);
+    float3 li = samp.xyz;
+    float depth = samp.w;
+
+    // Updated shared depth sample
+    sharedDepthSamples[threadIDWithinGroup] = float4(rd, depth);
 
     // Updated shared sh
     float cosCo1 = PI;
@@ -161,6 +169,28 @@ void main(uint3 id: SV_DispatchThreadID,
                 shCoefficients[probeToBake * 28 + basis * 3 + 2] = shCoefficients[probeToBake * 28 + basis * 3 + 2] * srcBlend + sum.z * dstBlend;
             }
             
+        }
+
+        // Do depth
+        for (int thread = 0; thread < 64; thread++) {
+            float4 depthSample = sharedDepthSamples[thread];
+            float3 rd = depthSample.xyz; float depth = depthSample.w;
+            int2 texel = int2(DirectionToTexel(rd));
+
+            // Splat 5x5
+            for (int y = -2; y <= 2; y++) {
+                if (texel.y + y < 0 || texel.y + y >= 16) continue;
+                for (int x = -2; x <= 2; x++) {
+                    int2 currTexel = texel + int2(x, y);
+                    if (currTexel.x < 0 || currTexel.x >= 16) continue;
+
+                    float weight = pow(max(0., dot(rd, TexelToDirection(currTexel))), 8.);
+
+                    uint ind = TexelToBufferIndices(probeToBake, currTexel);
+                    depthBuffer[ind + 0] += depth * weight;
+                    depthBuffer[ind + 1] += weight;
+                }
+            }
         }
     }
 }

@@ -894,7 +894,7 @@ private:
         // testGI();
         UpdateUniformBuffer(0);
         pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao,
-            uvec3(40, 10, 40), vec3(0), vec3(15.5, 9, 15.5));
+            uvec3(20, 10, 20), vec3(0), vec3(15.5, 9, 15.5));
         //skySh = pc.BakeAndSetSkyboxProbe();
         //envSh = std::move(pc.BakeEnvironmentProbes(uvec3(14, 7, 14), vec3(0), vec3(15.5, 9, 15.5)));
         //writeToCubemap();

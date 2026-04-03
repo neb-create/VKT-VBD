@@ -78,7 +78,7 @@ void main(uint3 id: SV_DispatchThreadID,
     uint3 groupID3 : SV_GroupID) {
 
     float3 rd = uniformSphere(float2(rngi(id.x - id.y + 525), rngi(id.x + id.y + 525)));
-    float3 li = SampleEnvironment(probePositionUBO.probePos, rd, ubo.model, worldVertices, worldIndices, worldTex, worldMetal, worldRoughness, worldAO, skySh, skybox);
+    float3 li = SampleEnvironment(probePositionUBO.probePos, rd, ubo.model, worldVertices, worldIndices, worldTex, worldMetal, worldRoughness, worldAO, skySh, skybox).xyz;
 
     // All of these basis functions are normalized so no need to divide by their function dot product
     uint threadIDWithinGroup = threadIDWithinGroup3.y * 8 + threadIDWithinGroup3.x;

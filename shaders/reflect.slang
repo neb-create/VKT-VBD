@@ -65,7 +65,7 @@ float4 fragMain(VSOutput o) : SV_Target
     float3 reflRay = normalize(reflect(o.worldPos - camPos, norm));
 
     float3 Lo = SampleEnvironment(sta, reflRay,
-                                  ubo.model, worldVertices, worldIndices, worldTex, worldMetal, worldRoughness, worldAO, skyboxSh, skybox);
+                                  ubo.model, worldVertices, worldIndices, worldTex, worldMetal, worldRoughness, worldAO, skyboxSh, skybox).xyz;
     float3 col = gammaCorrect(reinhardOp(Lo));
 
     return float4(SampleSh(norm, skyboxSh, 0), 1.);//float4(col, 1.);
