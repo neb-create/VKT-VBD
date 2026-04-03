@@ -28,12 +28,13 @@ struct ProbeVolume {
 
 class ProbeCreator {
 public:
-	void Create(const VulkanReferences*, WTexture* skybox, vector<WBuffer>* uniformBuffers, WTexture* testCubeMap, Mesh* testRoom, WTexture* testRoomTexture, WTexture* metallic, WTexture* roughness, WTexture* ao);
-	uPtr<ProbeVolume> BakeEnvironmentProbes(glm::uvec3 probeCount, vec3 boundingBoxOrigin, vec3 boundingBoxSize);
-	
-	WBuffer* BakeAndSetSkyboxProbe();
+	void Create(const VulkanReferences*, WTexture* skybox, vector<WBuffer>* uniformBuffers, WTexture* testCubeMap, Mesh* testRoom, WTexture* testRoomTexture, WTexture* metallic, WTexture* roughness, WTexture* ao,
+		uvec3 probeCounts, vec3 boundingBoxOrigin, vec3 boundingBoxSize);
+	uPtr<ProbeVolume> probeVolume;
 private:
-	void BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset);
+	void BakeEnvironmentProbes(glm::uvec3 probeCounts, mat4 transform);
+	WBuffer* BakeAndSetSkyboxProbe();
+	// void BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset);
 	void AccumulateScratchIntoBuffer(WBuffer* buf, vk::DeviceSize offset);
 	void ZeroOutScratchBuffer();
 
@@ -54,8 +55,8 @@ private:
 };
 
 // need to change spherical harmonic shader (how to flatten group id & thread id) as well as sampling shader (how much to divide sh sample, or just do it when cpu accuming) if you change this
-constexpr uint32_t SQRT_SAMPLE_COUNT = 256; // Sqrt Sample Count
+constexpr uint32_t SQRT_THREADS_PER_PASS = 256;
 constexpr uint32_t SQRT_THREADS_PER_GROUP = 8;
 
-constexpr uint32_t GROUP_COUNT = (SQRT_SAMPLE_COUNT / SQRT_THREADS_PER_GROUP) * (SQRT_SAMPLE_COUNT / SQRT_THREADS_PER_GROUP);
-constexpr vk::DeviceSize SCRATCH_BUFFER_SIZE = GROUP_COUNT * sizeof(float) * 3 * 9; // Each group gets its own SH, non-atomic
+constexpr uint32_t GROUP_SIZE = (SQRT_THREADS_PER_PASS / SQRT_THREADS_PER_GROUP) * (SQRT_THREADS_PER_PASS / SQRT_THREADS_PER_GROUP);
+constexpr vk::DeviceSize SCRATCH_BUFFER_SIZE = GROUP_SIZE * sizeof(float) * 3 * 9; // Each group gets its own SH, non-atomic

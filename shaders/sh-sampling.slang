@@ -4,11 +4,12 @@ module SHSampling;
 
 public struct UProbeVolumeLayout {
     float4x4 invTransform;
+    float4x4 transform;
     uint3 probeCounts;
 };
 
 uint probeIDToOffset(uint3 probeCounts, uint3 id) {
-    return 27 * (probeCounts.x * probeCounts.y * id.z + probeCounts.x * id.y + id.x);
+    return 28 * (probeCounts.x * probeCounts.y * id.z + probeCounts.x * id.y + id.x);
 }
 
 // TODO: potentially put skybox SH into cubemap since it's one of a kind and is used a lot
@@ -17,8 +18,8 @@ public float3 SampleSh(float3 rd, StructuredBuffer<float> shCoefficients, uint b
     // rd = normalize(rd);
     float cosCo1 = 1.; // PI;
     float cosCo2 = 1.; //(2. / 3.) * PI;
-    float cosCo3 = 1.;//PI * .25;
-    float mult = 4. * PI;// / (128. * 128.); // TODO: dont hardcode the monte carlo count
+    float cosCo3 = 1.; // PI * .25;
+    float mult = 4. * PI;// / (64.0 * 1024.);// / (128. * 128.); // TODO: dont hardcode the monte carlo count
     float3 c1 = mult * cosCo1 * float3(shCoefficients[0 + bufferOffset], shCoefficients[1 + bufferOffset], shCoefficients[2 + bufferOffset]);
 
     float3 c2 = mult * cosCo2 * float3(shCoefficients[3 + bufferOffset], shCoefficients[4 + bufferOffset], shCoefficients[5 + bufferOffset]);

@@ -32,9 +32,11 @@ public:
 
 class ComputePipeline : public WPipeline {
 public:
-    void Create(const VulkanReferences& ref, const string& path, const vector<ShaderParameter::SParameter>& parameters, const vector<ShaderParameter::MParameter>& parameterData, uvec3 workGroupSize);
+    void Create(const VulkanReferences& ref, const string& path, const vector<ShaderParameter::SParameter>& parameters, const vector<ShaderParameter::MParameter>& parameterData, uvec3 workGroupSize, bool usePushConstants = false, vk::DeviceSize pushConstantSize = 0);
     // void DispatchImmediate(bool waitForComplete = true, uvec3 totalThreadCount);
-    void EnqueueDispatch(ComputeDispatcher*, uvec3 threadSize); // wait but can't do arb compute shaders in different cmd buffers maybe info on it or smth NVM i think its ALL GOOD binding n shit is a cmd buf command
+    void EnqueuePushConstants(ComputeDispatcher*, void* data); // todo: generalize to pipeline
+    void EnqueueDispatch(ComputeDispatcher*, uvec3 threadSize); // wait but can't do arb compute shaders in different cmd buffers maybe info on it or smth NVM i think its ALL GOOD binding n is a cmd buf command
+    void EnqueueComputeBarrier(ComputeDispatcher*, vk::AccessFlags srcAccess, vk::AccessFlags dstAccess);
 
 private:
     // Full definition required for member variables that aren't uPtrs since size needs to be known
@@ -42,4 +44,7 @@ private:
     uvec3 workGroupSize;
 
     bool isCreated = false;
+
+    bool usePushConstants = false;
+    vk::DeviceSize pushConstantsSize;
 };

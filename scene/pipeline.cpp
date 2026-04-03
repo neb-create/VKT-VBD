@@ -239,8 +239,10 @@ void ShaderPipeline::BindMaterialDescriptorSets(const VulkanReferences& ref, con
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, *mat.descriptorSets[setIndex], dynamicOffsets);
 }
 
-void ComputePipeline::Create(const VulkanReferences& ref, const string& path, const vector<ShaderParameter::SParameter>& parameters, const vector<ShaderParameter::MParameter>& parameterData, uvec3 workGroupSize) {
+void ComputePipeline::Create(const VulkanReferences& ref, const string& path, const vector<ShaderParameter::SParameter>& parameters, const vector<ShaderParameter::MParameter>& parameterData, uvec3 workGroupSize, bool usePushConstants, vk::DeviceSize pushConstantSize) {
     this->workGroupSize = workGroupSize;
+    this->usePushConstants = usePushConstants;
+    this->pushConstantsSize = pushConstantSize;
 
     //
     auto computeModule = CreateShaderModule(ref, path);
@@ -258,10 +260,19 @@ void ComputePipeline::Create(const VulkanReferences& ref, const string& path, co
     CreateDescriptorSetLayout(ref, parameters);
     assert(descriptorSetLayout != nullptr);
 
+    assert(!usePushConstants || pushConstantSize != 0);
+    vk::PushConstantRange pushConstantRange = {
+        .stageFlags = vk::ShaderStageFlagBits::eCompute,
+        .offset = 0,
+        .size = static_cast<uint32_t>(pushConstantSize)
+    };
+
     vk::PipelineLayoutCreateInfo layoutInfo = {
         .setLayoutCount = 1,
         .pSetLayouts = &*descriptorSetLayout,
-        .pushConstantRangeCount = 0
+
+        .pushConstantRangeCount = usePushConstants ? 1u : 0u,
+        .pPushConstantRanges = &pushConstantRange
     };
 
     pipelineLayout = PipelineLayout(ref.device, layoutInfo);
@@ -290,4 +301,23 @@ void ComputePipeline::EnqueueDispatch(ComputeDispatcher* dispatcher, uvec3 total
     uvec3 workGroupCount = ceil(vec3(totalThreadCount) / vec3(workGroupSize));
     // std::cout << "wx: " << workGroupCount.x << " wy: " << workGroupCount.y << " wz: " << workGroupCount.z << std::endl;
     dispatcher->cmd.dispatch(workGroupCount.x, workGroupCount.y, workGroupCount.z);
+}
+
+void ComputePipeline::EnqueuePushConstants(ComputeDispatcher* dispatcher, void* data) {
+    // todo: use modern but requires generics?
+    assert(pushConstantsSize != 0);
+    vkCmdPushConstants(*dispatcher->cmd, *pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantsSize, data);
+}
+
+void ComputePipeline::EnqueueComputeBarrier(ComputeDispatcher* dispatcher, vk::AccessFlags srcAccess, vk::AccessFlags dstAccess) {
+    vk::MemoryBarrier barrier = {
+        .srcAccessMask = srcAccess,
+        .dstAccessMask = dstAccess
+    };
+
+    dispatcher->cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, barrier, {}, {}
+    );
 }

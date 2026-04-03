@@ -51,11 +51,18 @@ struct UProbePosition {
 
 struct UProbeLayout {
 	alignas(64) mat4 invTransform;
+	alignas(64) mat4 transform;
 	alignas(16) uvec3 probeCounts;
 };
 
+struct PBakePassInfo {
+	alignas(4) uint32_t currGroup;
+	alignas(4) uint32_t currBake;
+};
+
 // TODO: all these params def annoying so not having it, need to have some struct to represent the world
-void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<WBuffer>* uniformBuffers, WTexture* testCubeMap, Mesh* testRoom, WTexture* testRoomTexture, WTexture* metallic, WTexture* roughness, WTexture* ao) {
+void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<WBuffer>* uniformBuffers, WTexture* testCubeMap, Mesh* testRoom, WTexture* testRoomTexture, WTexture* metallic, WTexture* roughness, WTexture* ao,
+	uvec3 probeCounts, vec3 boundingBoxOrigin, vec3 boundingBoxSize) {
 	this->ref = ref;
 
 	// Create Scratch Buffer
@@ -63,6 +70,9 @@ void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<
 	zeroBuffer.CreateDeviceLocalFromData(*ref, SCRATCH_BUFFER_SIZE, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, zeroData.data());
 	shScratchBuffer.Create(*ref, SCRATCH_BUFFER_SIZE, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eDeviceLocal);
 	ZeroOutScratchBuffer();
+
+	// Create Compute Dispatcher
+	computeDispatcher.Create(*ref);
 
 	// Create Skybox Probe Baker
 	vector skyShaParams = {
@@ -75,31 +85,60 @@ void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<
 	};
 	bakeSkyboxProbe.Create(*ref, "shaders/spherical-harmonics-sky.spv", skyShaParams, skyMatParams, uvec3(SQRT_THREADS_PER_GROUP, SQRT_THREADS_PER_GROUP, 1));
 
-	// Create Empty Skybox SH Buffer
+	// Create Skybox SH
 	skyboxSh = mkU<WBuffer>();
 	skyboxSh->Create(*ref, 27 * sizeof(float), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	BakeAndSetSkyboxProbe();
 
-	// Create Empty Probe Position Buffer
+	// Create Empty Probe Position UBO
 	probePositionUBO.push_back(WBuffer());
 	probePositionUBO[0].Create(*ref, ceilToNearest(sizeof(UProbePosition), 16), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	probePositionUBO[0].MapMemory();
 
+	// Make Probe Volume
+	probeVolume = mkU<ProbeVolume>();
+
+	vk::DeviceSize probeCount = probeCounts.x * probeCounts.y * probeCounts.z;
+	vk::DeviceSize envShSize = sizeof(float) * 28;
+	probeVolume->shCoefficients.Create(*ref, probeCount * envShSize,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+	// Transform
+	mat4 transform = glm::translate(mat4(1.0), boundingBoxOrigin) * glm::scale(mat4(1.0), boundingBoxSize) * glm::translate(mat4(1.0), vec3(-0.5));
+
+	// Parameters
+	probeVolume->probeCounts = probeCounts;
+	probeVolume->transform = transform;
+	probeVolume->invTransform = glm::inverse(transform);
+
+	// Create Uniform
+	probeVolume->probeLayoutUBO.push_back(WBuffer());
+	probeVolume->probeLayoutUBO[0].Create(*ref, ceilToNearest(sizeof(UProbeLayout), 16), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	probeVolume->probeLayoutUBO[0].MapMemory();
+	UProbeLayout uProbeLayout = {
+		.invTransform = probeVolume->invTransform,
+		.transform = probeVolume->transform,
+		.probeCounts = probeVolume->probeCounts
+	};
+	memcpy(probeVolume->probeLayoutUBO[0].mappedMemory, &uProbeLayout, sizeof(UProbeLayout));
+
 	// Create Environment Probe Baker
 	vector envShaParams = {
+		// ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eCompute },
 		ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
+		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
 		ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
-		ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
 	};
 	vector envMatParams = {
-		ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &probePositionUBO}),
+		// ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &probePositionUBO}),
 		ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = uniformBuffers}),
 		ShaderParameter::MParameter(ShaderParameter::USampler {.texture = testCubeMap}),
 		ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom->vertexBuffer}),
@@ -109,12 +148,13 @@ void ProbeCreator::Create(const VulkanReferences* ref, WTexture* skybox, vector<
 		ShaderParameter::MParameter(ShaderParameter::USampler {.texture = roughness}),
 		ShaderParameter::MParameter(ShaderParameter::USampler {.texture = ao}),
 		ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = skyboxSh.get() }),
-		ShaderParameter::MParameter(ShaderParameter::UBuffer{.buffer = &shScratchBuffer}),
+		ShaderParameter::MParameter(ShaderParameter::UBuffer{.buffer = &probeVolume->shCoefficients}),
+		ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &probeVolume->probeLayoutUBO}),
 	};
-	bakeEnvironmentProbe.Create(*ref, "shaders/spherical-harmonics-env.spv", envShaParams, envMatParams, uvec3(SQRT_THREADS_PER_GROUP, SQRT_THREADS_PER_GROUP, 1));
+	bakeEnvironmentProbe.Create(*ref, "shaders/spherical-harmonics-env-prog.spv", envShaParams, envMatParams, uvec3(SQRT_THREADS_PER_GROUP, SQRT_THREADS_PER_GROUP, 1), true, sizeof(PBakePassInfo));
 
-	// Create Compute Dispatcher
-	computeDispatcher.Create(*ref);
+	// Bake
+	BakeEnvironmentProbes(probeCounts, transform);
 }
 
 void ProbeCreator::AccumulateScratchIntoBuffer(WBuffer* buf, vk::DeviceSize dstOffset) {
@@ -133,7 +173,7 @@ void ProbeCreator::AccumulateScratchIntoBuffer(WBuffer* buf, vk::DeviceSize dstO
 
 	// Divide by monte carlo count
 	for (int i = 0; i < 27; i++) {
-		sh[i] /= (1.0f * SQRT_SAMPLE_COUNT * SQRT_SAMPLE_COUNT);
+		sh[i] /= (1.0f * SQRT_THREADS_PER_PASS * SQRT_THREADS_PER_PASS);
 	}
 
 	// Create return buffer
@@ -145,87 +185,78 @@ void ProbeCreator::ZeroOutScratchBuffer() {
 }
 
 // TODO: expand scratch buffer to bake multiple at once using the same scratch buffer
-void ProbeCreator::BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset) {
-	// TODO: until we decouple compute material and pipeline (compute material either inherits or is straight up equal to material for now), just do skybox ignore pos
-	// well actually we dont decouple until we do stuff in parallel, for now and for a while just vary some uniform buffer that contains position and do one at a time..
-	// scratch buffer makes doing stuff in parallel annoying anyways, atomic so much easier
-	
-	// Must have skybox baked to bake env
+//void ProbeCreator::BakeEnvironmentProbe(vec3 pos, WBuffer* shCoefficients, vk::DeviceSize offset) {
+//	// TODO: until we decouple compute material and pipeline (compute material either inherits or is straight up equal to material for now), just do skybox ignore pos
+//	// well actually we dont decouple until we do stuff in parallel, for now and for a while just vary some uniform buffer that contains position and do one at a time..
+//	// scratch buffer makes doing stuff in parallel annoying anyways, atomic so much easier
+//	
+//	// Must have skybox baked to bake env
+//	assert(isSkyboxBaked);
+//
+//	// Update UBO
+//	UProbePosition probePosStruct = {
+//		.probePos = pos
+//	};
+//	memcpy(probePositionUBO[0].mappedMemory, &probePosStruct, sizeof(UProbePosition)); // Copy doesn't have to be 16-aligned, 4 byte padding can be trash
+//
+//	// Dispatch
+//	computeDispatcher.StartRecord(*ref);
+//	bakeEnvironmentProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_THREADS_PER_PASS, SQRT_THREADS_PER_PASS, 1)); // TODO: would need atomics to easily do multiple probes at once
+//	computeDispatcher.FinishRecordSubmit(*ref, true);
+//	
+//	// Accumulate into it
+//	AccumulateScratchIntoBuffer(shCoefficients, offset);
+//
+//	// Clear scratch
+//	ZeroOutScratchBuffer();
+//}
+
+void ProbeCreator::BakeEnvironmentProbes(glm::uvec3 probeCounts, mat4 transform) {
 	assert(isSkyboxBaked);
 
-	// Update UBO
-	UProbePosition probePosStruct = {
-		.probePos = pos
-	};
-	memcpy(probePositionUBO[0].mappedMemory, &probePosStruct, sizeof(UProbePosition)); // Copy doesn't have to be 16-aligned, 4 byte padding can be trash
+	//// Bake all probes
+	//for (int k = 0; k < probeCounts.z; k++) {
+	//	for (int j = 0; j < probeCounts.y; j++) {
+	//		for (int i = 0; i < probeCounts.x; i++) {
+	//			vec3 uv = vec3(i, j, k) / (vec3(probeCounts)-vec3(1));
+	//			vec3 pos = transform * vec4(uv, 1.0);
 
-	// Dispatch
+	//			vk::DeviceSize flattenedIndex = k * probeCounts.y * probeCounts.x + j * probeCounts.x + i;
+
+	//			BakeEnvironmentProbe(pos, &probeVolume->shCoefficients, flattenedIndex * shSize);
+
+	//			std::cout << "Baked Probe " << (flattenedIndex+1) << "/" << (probeCounts.x * probeCounts.y * probeCounts.z) << std::endl;
+	//		}
+	//	}
+	//}
+	
+	//
+	uint32_t probeCount = probeCounts.x * probeCounts.y * probeCounts.z;
+	uint32_t bakeCount = 1024; // TODO: make not hardcoded
+	uint32_t groupCount = ceilDiv(probeCount, GROUP_SIZE);
+	std::cout << "Probe Count: " << probeCount << " Group Count: " << groupCount << std::endl;
+
+	struct PBakePassInfo bakePassInfo;
+
 	computeDispatcher.StartRecord(*ref);
-	bakeEnvironmentProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_SAMPLE_COUNT, SQRT_SAMPLE_COUNT, 1)); // TODO: would need atomics to easily do multiple probes at once
-	computeDispatcher.FinishRecordSubmit(*ref, true);
-	
-	// Accumulate into it
-	AccumulateScratchIntoBuffer(shCoefficients, offset);
-
-	// Clear scratch
-	ZeroOutScratchBuffer();
-}
-
-uPtr<ProbeVolume> ProbeCreator::BakeEnvironmentProbes(glm::uvec3 probeCounts, vec3 boundingBoxOrigin, vec3 boundingBoxSize) {
-	assert(isSkyboxBaked);
-
-	// Transform
-	mat4 transform = glm::translate(mat4(1.0), boundingBoxOrigin) * glm::scale(mat4(1.0), boundingBoxSize) * glm::translate(mat4(1.0), vec3(-0.5));
-
-	// Sizes
-	vk::DeviceSize probeCount = probeCounts.x * probeCounts.y * probeCounts.z;
-	vk::DeviceSize shSize = 27 * sizeof(float);
-
-	// Create Volume
-	uPtr<ProbeVolume> probeVolume = mkU<ProbeVolume>();
-
-	// Buffer
-	probeVolume->shCoefficients.Create(*ref, probeCount * shSize,
-		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-	// Parameters
-	probeVolume->probeCounts = probeCounts;
-	probeVolume->transform = transform;
-	probeVolume->invTransform = glm::inverse(transform);
-
-	// Create Uniform
-	probeVolume->probeLayoutUBO.push_back(WBuffer());
-	probeVolume->probeLayoutUBO[0].Create(*ref, ceilToNearest(sizeof(UProbeLayout), 16), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	probeVolume->probeLayoutUBO[0].MapMemory();
-	UProbeLayout uProbeLayout = {
-		.invTransform = probeVolume->invTransform,
-		.probeCounts = probeVolume->probeCounts
-	};
-	memcpy(probeVolume->probeLayoutUBO[0].mappedMemory, &uProbeLayout, sizeof(UProbeLayout));
-
-	// Bake all probes
-	for (int k = 0; k < probeCounts.z; k++) {
-		for (int j = 0; j < probeCounts.y; j++) {
-			for (int i = 0; i < probeCounts.x; i++) {
-				vec3 uv = vec3(i, j, k) / (vec3(probeCounts)-vec3(1));
-				vec3 pos = transform * vec4(uv, 1.0);
-
-				vk::DeviceSize flattenedIndex = k * probeCounts.y * probeCounts.x + j * probeCounts.x + i;
-
-				BakeEnvironmentProbe(pos, &probeVolume->shCoefficients, flattenedIndex * shSize);
-
-				std::cout << "Baked Probe " << (flattenedIndex+1) << "/" << (probeCounts.x * probeCounts.y * probeCounts.z) << std::endl;
-			}
+	for (int i = 0; i < bakeCount; i++) {
+		bakePassInfo.currBake = i;
+		for (int g = 0; g < groupCount; g++) {
+			bakePassInfo.currGroup = g;
+			bakeEnvironmentProbe.EnqueuePushConstants(&computeDispatcher, &bakePassInfo);
+			bakeEnvironmentProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_THREADS_PER_PASS, SQRT_THREADS_PER_PASS, 1));
 		}
+		bakeEnvironmentProbe.EnqueueComputeBarrier(&computeDispatcher, 
+			vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead, 
+			vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead);
 	}
-
-	return std::move(probeVolume);
+	computeDispatcher.FinishRecordSubmit(*ref, true);
 }
 
 WBuffer* ProbeCreator::BakeAndSetSkyboxProbe() {
 	// Dispatch
 	computeDispatcher.StartRecord(*ref);
-	bakeSkyboxProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_SAMPLE_COUNT, SQRT_SAMPLE_COUNT, 1));
+	bakeSkyboxProbe.EnqueueDispatch(&computeDispatcher, uvec3(SQRT_THREADS_PER_PASS, SQRT_THREADS_PER_PASS, 1));
 	computeDispatcher.FinishRecordSubmit(*ref, true);
 
 	AccumulateScratchIntoBuffer(skyboxSh.get(), 0);
