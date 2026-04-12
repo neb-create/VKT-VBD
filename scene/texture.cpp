@@ -311,7 +311,7 @@ void WTexture::CreateSampler(const VulkanReferences& ref) {
         .addressModeV = vk::SamplerAddressMode::eRepeat,
         .addressModeW = vk::SamplerAddressMode::eRepeat, // break?
 
-        .anisotropyEnable = vk::True, // One frag sampling from lots of texels, auto and nice
+        .anisotropyEnable = vk::False, // One frag sampling from lots of texels, auto and nice
         .maxAnisotropy = ref.physicalDevice.getProperties().limits.maxSamplerAnisotropy,
 
         .compareEnable = vk::False,
