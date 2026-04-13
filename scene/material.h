@@ -26,7 +26,7 @@ private:
 
 struct UniformBufferObject {
 	alignas(4) float off;
-	alignas(16) mat4 model; // TODO: remove
+	alignas(16) mat4 raytraceSceneModel; // TODO: remove
 	alignas(16) mat4 view;
 	alignas(16) mat4 proj;
 };

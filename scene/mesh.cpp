@@ -8,6 +8,25 @@ void Mesh::CreateFromFile(const VulkanReferences& ref, const std::string& path, 
     LoadModel(path);
     CreateBuffers(ref);
 }
+void Mesh::CreateFromArrays(const VulkanReferences& ref, const vector<vec3>& positions, const vector<vec3>& colors, const vector<vec3>& normals, const vector<uint32_t>& indices, bool isStorageBuffer) {
+    this->vertices.clear();
+    this->indices = indices;
+    this->indexCount = this->indices.size();
+    this->isStorageBuffer = isStorageBuffer;
+
+    for (int i = 0; i < positions.size(); ++i) {
+        this->vertices.push_back(
+            Vertex{
+                .pos = positions[i],
+                .color = colors[i],
+                .uv = vec2(0),
+                .norm = normals[i]
+            }
+        );
+    }
+
+    CreateBuffers(ref);
+}
 
 void Mesh::CreateBuffers(const VulkanReferences& ref) {
     vk::DeviceSize vertexBufferSize = sizeof(Vertex) * vertices.size();

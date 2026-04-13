@@ -49,6 +49,7 @@ namespace std {
 class Mesh {
 public:
     void CreateFromFile(const VulkanReferences&, const std::string& path, bool isStorageBuffer = false);
+    void CreateFromArrays(const VulkanReferences& ref, const vector<vec3>& positions, const vector<vec3>& colors, const vector<vec3>& normals, const vector<uint32_t>& indices, bool isStorageBuffer = false);
 
     WBuffer vertexBuffer;
     WBuffer indexBuffer;

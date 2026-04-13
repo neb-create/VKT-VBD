@@ -28,6 +28,12 @@
 
 #include "lighting/gi-manager.h"
 
+#define VBD
+
+#ifdef VBD
+#include "vbd/vbd-manager.h"
+#endif
+
 using namespace std;
 using namespace vk::raii;
 using namespace glm;
@@ -115,6 +121,12 @@ private:
     Material blobMaterial;
     Material probeOrbMaterial;
     Material depthOrbMaterial;
+
+#ifdef VBD
+    ShaderPipeline vbdShader;
+    Material vbdMaterial;
+    VBDManager vbdManager;
+#endif
 
     WTexture whiteTexture;
 
@@ -351,7 +363,8 @@ private:
         coreReferences.minUniformBufferOffsetAlignment = physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
         std::cout << "Max Texture Size: " << physicalDeviceProperties.limits.maxImageDimension2D << std::endl;
         
-        std::cout << "Max Compute Work Group Size: " << physicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << std::endl;
+        std::cout << "Max Compute Work Group Size: " << physicalDeviceProperties.limits.maxComputeWorkGroupSize[0] << ", " << physicalDeviceProperties.limits.maxComputeWorkGroupSize[1] << ", " << physicalDeviceProperties.limits.maxComputeWorkGroupSize[2] << std::endl;
+        std::cout << "Max Compute Work Group Dispatch Count: " << physicalDeviceProperties.limits.maxComputeWorkGroupCount[0] << ", " << physicalDeviceProperties.limits.maxComputeWorkGroupCount[1] << ", " << physicalDeviceProperties.limits.maxComputeWorkGroupCount[2] << std::endl;
     }
 
     uint32_t graphicsAndComputeIndex, presentIndex;
@@ -667,134 +680,6 @@ private:
             vk::ImageAspectFlagBits::eDepth);
     }
 
-    void testCompute() {
-        uint32_t size = 551;
-        vk::DeviceSize byteSize = sizeof(int) * size;
-        vector<int> inData(size);
-        for (int i = 0; i < size; i++) {
-            inData[i] = i;
-        }
-
-        struct ComputeUniformData {
-            alignas(16) uvec3 invocationCount;
-        };
-        ComputeUniformData uniformData = {
-            .invocationCount = uvec3(size, 1, 1)
-        };
-
-        vector<WBuffer> uBuffer(1);
-        WBuffer inBuffer;
-        WBuffer outBuffer;
-
-        uBuffer[0].Create(coreReferences, sizeof(ComputeUniformData), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
-        uBuffer[0].MapMemory();
-        memcpy(uBuffer[0].mappedMemory, &uniformData, sizeof(ComputeUniformData));
-        uBuffer[0].UnmapMemory(); // One-time test
-
-        inBuffer.CreateDeviceLocalFromData(coreReferences, byteSize, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, inData.data());
-        outBuffer.Create(coreReferences, byteSize, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-        vector shaderParams = {
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eCompute },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
-            ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eCompute },
-        };
-
-        vector materialParams = {
-            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &inBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &outBuffer}),
-        };
-
-        ComputePipeline computeShader;
-        computeShader.Create(coreReferences, "shaders/test-compute.spv", shaderParams, materialParams, uvec3(256, 1, 1));
-
-        ComputeDispatcher dispatcher;
-        dispatcher.Create(coreReferences);
-
-        dispatcher.StartRecord(coreReferences);
-        computeShader.EnqueueDispatch(&dispatcher, uvec3(size, 1, 1));
-        dispatcher.FinishRecordSubmit(coreReferences, true);
-
-        // Test retrieve
-        WBuffer receiveBuffer;
-        receiveBuffer.Create(coreReferences, byteSize, vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-        receiveBuffer.CopyFrom(coreReferences, outBuffer, byteSize);
-
-        /*int* data = (int*) receiveBuffer.MapMemory();
-        for (int i = 0; i < size; i++) {
-            std::cout << data[i] << std::endl;
-        }*/
-
-        // receiveBuffer.UnmapMemory();
-
-    }
-
-    void testGI() {
-        giManager = mkU<GIManager>(&coreReferences);
-
-        giManager->Test(&testCubeMap);
-    }
-
-    WTexture writtenToCubemap;
-    void writeToCubemap() {
-
-        UpdateUniformBuffer(0); // jank
-        
-        writtenToCubemap.CreateCubeMapFromFiles(coreReferences, {
-            "textures/envmaps/storforsen/posx.jpg",
-            "textures/envmaps/storforsen/negx.jpg",
-            "textures/envmaps/storforsen/posy.jpg",
-            "textures/envmaps/storforsen/negy.jpg",
-            "textures/envmaps/storforsen/posz.jpg",
-            "textures/envmaps/storforsen/negz.jpg"
-            }, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal, 
-            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment, 
-            vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eColorAttachmentOptimal); // drawing transitions to color attachment everytime right now anyways, later can optimize using a render graph typ eof thing.
-
-        Material deferredMaterial;
-        vector materialParams = {
-            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testTexture}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &metallic}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &roughness}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &ao}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.vertexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &chairMesh.indexBuffer}),
-            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
-            ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &giManager->shCoefficients})
-        };
-        deferredMaterial.Create(&shaderPipeline, coreReferences, materialParams);
-
-        vk::Format depthFormat = GetDepthFormat();
-        WTexture tempDepthTexture;
-        tempDepthTexture.Create(coreReferences,
-            writtenToCubemap.width, writtenToCubemap.height,
-            depthFormat,
-            vk::ImageTiling::eOptimal,
-            vk::ImageUsageFlagBits::eDepthStencilAttachment,
-            vk::MemoryPropertyFlagBits::eDeviceLocal,
-            vk::ImageAspectFlagBits::eDepth);
-
-        // main shouldn't own it, i think the texture should own every possible image view or smth TODO, shouldn't be too many (but maybe too many when mips introduced, could just
-        // pass entire image view to rendertarget and the rendertarget owns it, could use uptr std move
-        ImageView colorView = writtenToCubemap.CreateImageView(coreReferences, 2);
-
-        RenderTarget target;
-        target.CreateFromTexture(&writtenToCubemap, colorView, &tempDepthTexture, tempDepthTexture.view);
-
-        WRenderPass pass;
-        pass.Create(coreReferences);
-
-        CommandBuffer cmd = BeginOneTimeCommands(coreReferences);
-        pass.Start(&target, &cmd); // TOdo: put semaphore
-
-        pass.EnqueueSetMaterial(deferredMaterial, 0);
-        pass.EnqueueDraw(chairMesh);
-        
-        pass.FinishExecute(true, vk::ImageLayout::eShaderReadOnlyOptimal);
-    }
-
     bool showDebugProbes;
     void DebugUI() {
         ImGui::Begin("Main Window");
@@ -845,17 +730,16 @@ private:
             *coreReferences.descriptorPool, MAX_FRAMES_IN_FLIGHT,
             static_cast<VkFormat>(swapSurfaceFormat.format), static_cast<VkFormat>(GetDepthFormat())
         );
-        GUIManager::RegisterUIFunction(std::bind(&Application::DebugUI, this));
-        GUIManager::RegisterUIFunction(std::bind(&TestGame::DrawUI, &game));
 
-        // Other stuff
+        // Meshes
         blobMesh.CreateFromFile(coreReferences, "models/blob.obj", true);
         sphereMesh.CreateFromFile(coreReferences, "models/smoothSphere.obj", true);
         chairMesh.CreateFromFile(coreReferences, "models/morrisChair.obj", true);
         cubeMesh.CreateFromFile(coreReferences, "models/cube.obj");
         testRoom.CreateFromFile(coreReferences, "models/testRoom.obj", true);
         std::cout << "Test Room Index Count: " << testRoom.indexCount << std::endl;
-
+        
+        // Textures
         whiteTexture.CreateFromFile(coreReferences, "textures/white.png", vk::Format::eR8G8B8A8Srgb);
         testTexture.CreateFromFile(coreReferences, "textures/chair/morrisChair_bigChairMat_BaseColor.tga.png", vk::Format::eR8G8B8A8Srgb);
         metallic.CreateFromFile(coreReferences, "textures/chair/morrisChair_bigChairMat_Metallic.tga.png", vk::Format::eR8G8B8A8Srgb);
@@ -871,6 +755,7 @@ private:
             }, vk::Format::eR8G8B8A8Srgb);
         testRoomTexture.CreateFromFile(coreReferences, "textures/testGiPicture.png", vk::Format::eR8G8B8A8Srgb);
 
+        // Skybox
         vector skyboxShaderParams = {
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
@@ -882,6 +767,17 @@ private:
         skyboxShader.Create(coreReferences, "shaders/skybox.spv", &swapSurfaceFormat.format, GetDepthFormat(), skyboxShaderParams, false, true);
         skyboxMaterial.Create(&skyboxShader, coreReferences, skyboxMaterialParams);
 
+#ifndef VBD
+        // UI
+        GUIManager::RegisterUIFunction(std::bind(&Application::DebugUI, this));
+        GUIManager::RegisterUIFunction(std::bind(&TestGame::DrawUI, &game));
+
+        // Bake Probes
+        UpdateUniformBuffer(0);
+        pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao,
+            uvec3(10, 5, 10), vec3(0), vec3(15.5, 9, 15.5));
+
+        // Objects
         vector shaderParams = {
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::DYNAMIC_UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
@@ -896,14 +792,6 @@ private:
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eFragment },
 
         };
-        shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
-        // testGI();
-        UpdateUniformBuffer(0);
-        pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao,
-            uvec3(10, 5, 10), vec3(0), vec3(15.5, 9, 15.5));
-        //skySh = pc.BakeAndSetSkyboxProbe();
-        //envSh = std::move(pc.BakeEnvironmentProbes(uvec3(14, 7, 14), vec3(0), vec3(15.5, 9, 15.5)));
-        //writeToCubemap();
         vector materialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
             ShaderParameter::MParameter(ShaderParameter::UDynamicUniform {
@@ -926,8 +814,10 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &pc.probeVolume->shCoefficients}),
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &pc.probeVolume->probeLayoutUBO}),
         };
+        shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
         testMaterial.Create(&shaderPipeline, coreReferences, materialParams);
 
+        // Only different to testMaterial is white albedo
         vector blobMaterialParams = {
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
             ShaderParameter::MParameter(ShaderParameter::UDynamicUniform {
@@ -952,6 +842,7 @@ private:
         };
         blobMaterial.Create(&shaderPipeline, coreReferences, blobMaterialParams);
 
+        // Lighting probe material
         vector probeMaterialParams = blobMaterialParams;
         probeMaterialParams[1] = ShaderParameter::MParameter(ShaderParameter::UDynamicUniform{
                 .buffers = pc.probeVolume->CreateEntityListUBO(coreReferences),
@@ -959,6 +850,7 @@ private:
             });
         probeOrbMaterial.Create(&shaderPipeline, coreReferences, probeMaterialParams);
 
+        // Depth probe material
         vector depthProbeShaderParams = {
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::DYNAMIC_UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
@@ -978,8 +870,30 @@ private:
         };
         depthOrbShader.Create(coreReferences, "shaders/display-probe-depth-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), depthProbeShaderParams);
         depthOrbMaterial.Create(&depthOrbShader, coreReferences, depthProbeMaterialParams);
+#else
+        vector vbdShaderParams = {
+                ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics },
+                ShaderParameter::SParameter{.type = ShaderParameter::Type::DYNAMIC_UNIFORM, .visibility = vk::ShaderStageFlagBits::eAllGraphics }
 
-        // testCompute();
+        };
+        vector vbdMaterialParams = {
+            ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &uniformBuffers}),
+            ShaderParameter::MParameter(ShaderParameter::UDynamicUniform {
+                .buffers = &uEntityBuffers,
+                .singleObjectSize =
+                static_cast<vk::DeviceSize>(
+                    ceilToNearest(
+                        sizeof(UEntity),
+                        coreReferences.minUniformBufferOffsetAlignment
+                    )
+                )
+            })
+        };
+        vbdShader.Create(coreReferences, "shaders/vbd-shader.spv", &swapSurfaceFormat.format, GetDepthFormat(), vbdShaderParams);
+        vbdMaterial.Create(&vbdShader, coreReferences, vbdMaterialParams);
+
+        vbdManager.Initialize(coreReferences);
+#endif
         
     }
 
@@ -997,8 +911,8 @@ private:
     }
 
     void UpdateUniformBuffer(uint32_t currFrame) {
-        vk::DeviceSize alignment = GetUniformAlignment<UEntity>(coreReferences);// ceilToNearest(sizeof(UEntity), coreReferences.minUniformBufferOffsetAlignment);
-        vector<UEntity> entities = {
+        vk::DeviceSize alignment = GetUniformAlignment<UEntity>(coreReferences);
+        vector<UEntity> entities = { // todo: management of entity indices or smth
             {.transform = game.roomTransform},
             {.transform = game.ballTransform}
         };
@@ -1008,7 +922,7 @@ private:
 
         UniformBufferObject ubo = {
             .off = time,
-            .model = glm::scale(mat4(1.0f), vec3(0.014f+0.5)) * glm::rotate(mat4(1.0f), 0*time + glm::radians(0.0f), vec3(0.0f, 1.0f, 0.0f)),
+            .raytraceSceneModel = glm::scale(mat4(1.0f), vec3(0.014f+0.5)) * glm::rotate(mat4(1.0f), 0*time + glm::radians(0.0f), vec3(0.0f, 1.0f, 0.0f)),
             .view = camera.GetViewMatrix(),
             .proj = camera.GetProjectionMatrix(),
         };
@@ -1061,6 +975,7 @@ private:
 
         renderPass.Start(&renderTarget, &commandBuffer, false); // bit dangerous; pointers to vector elems
 
+#ifndef VBD
         renderPass.EnqueueSetMaterial(skyboxMaterial, currFrameIndex);
         renderPass.EnqueueDraw(cubeMesh);
         renderPass.EnqueueSetMaterial(testMaterial, currFrameIndex, { 0 });
@@ -1071,6 +986,15 @@ private:
         if (showDebugProbes) {
             pc.probeVolume->DrawDebugProbeVolume(&renderPass, sphereMesh, depthOrbMaterial, currFrameIndex);
         }
+#else
+        renderPass.EnqueueSetMaterial(skyboxMaterial, currFrameIndex);
+        renderPass.EnqueueDraw(cubeMesh);
+
+        renderPass.EnqueueSetMaterial(vbdMaterial, currFrameIndex, { 1 });
+        int timeIndex = static_cast<int>(glm::floor(time*24)) % vbdManager.meshes.size();
+        std::cout << "Time Index: " << timeIndex << std::endl;
+        renderPass.EnqueueDraw(*vbdManager.meshes[timeIndex]);
+#endif
 
         renderPass.FinishExecute(false, vk::ImageLayout::ePresentSrcKHR, &presentCompleteSemaphore, &renderFinishedSemaphore);
 

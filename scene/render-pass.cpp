@@ -87,7 +87,7 @@ void WRenderPass::Start(RenderTarget* target, vk::raii::CommandBuffer* cmd, bool
 }
 
 void WRenderPass::EnqueueSetMaterial(const Material& mat, int setIndex, vector<uint32_t> dynamicIndices) {
-    (static_cast<const ShaderPipeline*>(mat.pipeline))->Bind(*currCmd);
+    (static_cast<const ShaderPipeline*>(mat.pipeline))->Bind(*currCmd); // TODO: separate binding mat and shader for optimization
     (static_cast<const ShaderPipeline*>(mat.pipeline))->BindMaterialDescriptorSets(*ref, *currCmd, mat, setIndex, dynamicIndices);
 }
 
