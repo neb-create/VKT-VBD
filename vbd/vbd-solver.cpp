@@ -27,6 +27,23 @@ void VBDSolver::SimulateUpToFrame(uint frameIndex) {
 
 constexpr vec3 g = vec3(0.0f, -0.98f, 0.0f);
 
+void UpdateVertex(HVertex* oldVert, HVertex* newVert) {
+	vec3 f = vec3(0);
+
+	HalfEdge* currEdge = oldVert->incomingEdge;
+	do {
+		HVertex* neighborVert = currEdge->sym->nextVertex;
+
+		vec3 diff = oldVert->pos - neighborVert->pos;
+		f += normalize(diff) * (4.0f - length(diff));
+
+		currEdge = currEdge->next->sym;
+	} while (currEdge != oldVert->incomingEdge);
+
+	newVert->vel += f * dt;
+	newVert->pos += newVert->vel * dt;
+}
+
 void VBDSolver::SimulateOneFrame() {
 	if (lastSimulatedMesh == nullptr) {
 		std::cerr << "ERROR: SimulateOneFrame() called with no lastSimulatedMesh" << std::endl;
@@ -39,12 +56,13 @@ void VBDSolver::SimulateOneFrame() {
 	// Simulate
 	for (int i = 0; i < newMesh->vertices.size(); i++) {
 		HVertex* v = newMesh->vertices[i].get();
-		if (v->pos.y < -2.0f) {
+		/*if (v->pos.y < -2.0f) {
 			v->vel.y *= -1.0f;
 			v->pos.y = -2.0f;
 		}
 		v->vel += dt * (g - 0.05f * v->pos);
-		v->pos += dt * v->vel;
+		v->pos += dt * v->vel;*/
+		UpdateVertex(lastSimulatedMesh->vertices[i].get(), v);
 	}
 
 	// Copy back
