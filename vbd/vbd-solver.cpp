@@ -101,7 +101,7 @@ void VBDSolver::SimulateOneFrame() {
 		}
 	}
 
-	for (int i = 0; i < 15; i++) {
+	for (int i = 0; i < lastSimulatedMesh->vertices.size(); i++) {
 		HVertex* v = lastSimulatedMesh->vertices[i].get();
 		v->vel = (1.0f / dt) * (v->pos - oldPositions[i]);
 	}
