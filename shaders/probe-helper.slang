@@ -26,7 +26,8 @@ public float2 localUVToAtlasUV(uint3 probeCounts, uint3 probeID3, float2 uv) {
     int2 tileID = uint2(probeCounts.x * probeID3.y + probeID3.x, probeID3.z);
 
     // 16x16 spanning square to 18x18 with gutters
-    float2 uv18 = (1.0 + uv * 16) / float2(18.0);
+    float2 p = uv * 2. - 1.;
+    float2 uv18 = (1.0 + 8. + p*8.) / float2(18.0);
 
     float2 atlasUV = (float2(tileID) + uv18) / float2(probeCounts.x * probeCounts.y, probeCounts.z); // conversion
     return atlasUV;
