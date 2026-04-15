@@ -20,4 +20,5 @@ private:
 	VBDSolver solver;
 
 	int frameCount = 250;
+	int currMaterialIndex = 0;
 };

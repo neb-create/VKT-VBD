@@ -27,7 +27,7 @@ HalfEdgeMesh::HalfEdgeMesh(const HalfEdgeMesh& other) {
     }
     for (uPtr<HalfEdge>& h : halfEdges) {
         h->next = halfEdgeIDToPtr[h->next->id];
-        h->sym = halfEdgeIDToPtr[h->sym->id];
+        h->sym = h->sym == nullptr ? nullptr : halfEdgeIDToPtr[h->sym->id];
         h->nextVertex = vertexIDToPtr[h->nextVertex->id];
         h->face = faceIDToPtr[h->face->id];
     }
@@ -186,4 +186,65 @@ void HalfEdgeMesh::LoadFromOBJ(const string& fileName) {
     }
 
     f.close();
+}
+
+void HalfEdgeMesh::TriangulateAllFaces() {
+    int initialFaceCount = faces.size();
+    for (int i = 0; i < initialFaceCount; ++i) {
+        TriangulateFace(faces[i].get());
+    }
+}
+
+void HalfEdgeMesh::TriangulateFace(Face* face) {
+    HalfEdge* startEdge = face->edge;
+    HalfEdge* currentEdge = startEdge->next;
+    
+    HalfEdge* prevEdge = startEdge;
+    while (prevEdge->next != startEdge) prevEdge = prevEdge->next;
+    HVertex* v1 = prevEdge->nextVertex;
+
+    HalfEdge* currNextForNew = startEdge;
+
+    while (currentEdge->next->next != startEdge) {
+
+        // Half Edge pointing to start vertex
+        HalfEdge* newEdge1 = addEdge();
+        newEdge1->next = currNextForNew;
+        newEdge1->nextVertex = v1; v1->incomingEdge = newEdge1;
+
+        // Half Edge pointing away from start vertex
+        HalfEdge* newEdge2 = addEdge();
+        newEdge2->next = currentEdge->next;
+        newEdge2->nextVertex = currentEdge->nextVertex;  currentEdge->nextVertex->incomingEdge = newEdge2;
+
+        currentEdge->next = newEdge1;
+
+        newEdge1->sym = newEdge2;
+        newEdge2->sym = newEdge1;
+
+        if (currentEdge == startEdge->next) {
+            // Connect to existing face
+            currentEdge->next->face = face;
+            face->edge = currentEdge->next;
+        }
+        else {
+            // Connect to new face
+            Face* newFace = addFace();
+
+            currentEdge->face = newFace; newFace->edge = currentEdge;
+            currentEdge->next->face = newFace;
+            currentEdge->next->next->face = newFace;
+        }
+
+        currNextForNew = newEdge2;
+        currentEdge = newEdge2->next;
+
+    }
+
+    Face* newFace = addFace();
+    currentEdge->next->next = currNextForNew;
+
+    currentEdge->face = newFace;
+    currentEdge->next->face = newFace;
+    currentEdge->next->next->face = newFace; newFace->edge = currentEdge->next->next;
 }

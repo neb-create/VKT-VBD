@@ -45,6 +45,7 @@ public:
     
     void LoadFromOBJ(const string&);
     uPtr<Mesh> convertToMesh(const VulkanReferences&);
+    void TriangulateAllFaces();
 private:
     friend class VBDSolver;
 
@@ -84,6 +85,9 @@ private:
     //
     void LoadVertex(const string&);
     void LoadFace(const string&, unordered_map<int, HalfEdge*>* vertexEndPointToEdge);
+
+    //
+    void TriangulateFace(Face* face);
 };
 
 void TriangulateConvexFace(Face* f, vector<vec3>* positions, vector<vec3>* colors, vector<vec3>* normals, vector<uint32_t>* indices);
