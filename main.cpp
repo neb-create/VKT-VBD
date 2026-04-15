@@ -775,7 +775,7 @@ private:
         // Bake Probes
         UpdateUniformBuffer(0);
         pc.Create(&coreReferences, &testCubeMap, &uniformBuffers, &testCubeMap, &testRoom, &testRoomTexture, &metallic, &roughness, &ao,
-            uvec3(10, 5, 10), vec3(0), vec3(15.5, 9, 15.5));
+            uvec3(10, 5, 10), vec3(0), vec3(16.5, 10, 16.5));
 
         // Objects
         vector shaderParams = {
@@ -789,6 +789,7 @@ private:
             ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::BUFFER, .visibility = vk::ShaderStageFlagBits::eFragment },
+            ShaderParameter::SParameter{.type = ShaderParameter::Type::SAMPLER, .visibility = vk::ShaderStageFlagBits::eFragment },
             ShaderParameter::SParameter{.type = ShaderParameter::Type::UNIFORM, .visibility = vk::ShaderStageFlagBits::eFragment },
 
         };
@@ -812,6 +813,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),// &writtenCubemap }),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &pc.probeVolume->shCoefficients}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &pc.probeVolume->octahedralDepthMap}),
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &pc.probeVolume->probeLayoutUBO}),
         };
         shaderPipeline.Create(coreReferences, "shaders/pbr-test.spv", &swapSurfaceFormat.format, GetDepthFormat(), shaderParams);
@@ -838,6 +840,7 @@ private:
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &testRoom.indexBuffer}),
             ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &testCubeMap}),
             ShaderParameter::MParameter(ShaderParameter::UBuffer {.buffer = &pc.probeVolume->shCoefficients}),
+            ShaderParameter::MParameter(ShaderParameter::USampler {.texture = &pc.probeVolume->octahedralDepthMap}),
             ShaderParameter::MParameter(ShaderParameter::UUniform {.uniformBuffers = &pc.probeVolume->probeLayoutUBO}),
         };
         blobMaterial.Create(&shaderPipeline, coreReferences, blobMaterialParams);

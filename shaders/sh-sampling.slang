@@ -1,4 +1,6 @@
 import probe_helper;
+import math_helper;
+import probe_visibility;
 
 module SHSampling;
 
@@ -42,7 +44,7 @@ public float3 SampleSh(float3 rd, StructuredBuffer<float> shCoefficients, uint b
 
 #define DEBUG_OUT_OF_BOUNDS 0
 
-public float3 SampleInterpolatedSh(float3 rd, float3 pos, StructuredBuffer<float> shCoefficients, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
+public float3 SampleInterpolatedSh(float3 norm, float3 pos, StructuredBuffer<float> shCoefficients, Sampler2D<float> depthTexture, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
     float3 lp = mul(probeLayout.invTransform, float4(pos, 1.)).xyz; // [0, 1] unless out of bounds
     #if DEBUG_OUT_OF_BOUNDS
     bool outOfBounds = min(lp.x, min(lp.y, lp.z)) < 0. || max(lp.x, max(lp.y, lp.z)) >= 1.;
@@ -55,30 +57,77 @@ public float3 SampleInterpolatedSh(float3 rd, float3 pos, StructuredBuffer<float
     uint3 id = uint3(lp);
     uint2 d = uint2(1, 0);
 
-    float3 c000 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yyy));
-    float3 c001 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yyx));
-    float3 c010 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yxy));
-    float3 c011 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yxx));
-    float3 c100 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xyy));
-    float3 c101 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xyx));
-    float3 c110 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xxy));
-    float3 c111 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xxx));
+    const uint3 offsets[8] = {
+        uint3(0, 0, 0),
+        uint3(0, 0, 1),
+        uint3(0, 1, 0),
+        uint3(0, 1, 1),
+        uint3(1, 0, 0),
+        uint3(1, 0, 1),
+        uint3(1, 1, 0),
+        uint3(1, 1, 1)
+    };
 
-    float3 c00 = lerp(c000, c001, fac.z);
-    float3 c01 = lerp(c010, c011, fac.z);
-    float3 c10 = lerp(c100, c101, fac.z);
-    float3 c11 = lerp(c110, c111, fac.z);
+    float3 totalIrradiance = 0.0;
+    float totalWeight = 0.0;
 
-    float3 c0 = lerp(c00, c01, fac.y);
-    float3 c1 = lerp(c10, c11, fac.y);
+    for (int i = 0; i < 8; i++) {
+        uint3 offset = offsets[i];
+        float3 probePos = mul(probeLayout.transform, float4(float3(id + offset) / float3(probeLayout.probeCounts - 1), 1.)).xyz;
+        float3 toProbe = probePos - pos;
 
-    float3 c = lerp(c0, c1, fac.x);
+        float distToProbe = length(toProbe);
+        float3 dirToProbe = normalize(toProbe);
 
-    #if DEBUG_OUT_OF_BOUNDS
-    if (outOfBounds) {
-        c = float3(2., 0., 2.);
+        // Sample
+        float3 sampleIrradiance = SampleSh(norm, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + offset));
+
+        // Trilinear
+        float3 trilinearWeights = lerp(1.-fac, fac, float3(offset));
+        float weight = trilinearWeights.x * trilinearWeights.y * trilinearWeights.z;
+
+        // Backface
+        // Offset prevents going to 0 when small details that are close to backfaces need light
+        // weight *= sqr(max(1e-4, (dot(dirToProbe, norm) + 1.) * .5));// + 0.2; // From the Josa Paper TODO: proper citation
+
+        // Depth
+        float2 depths = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + offset, DirectionToUV(-dirToProbe), depthTexture);
+        float avgDepth = depths.x;
+        float avgDepthSqr = depths.y;
+        float variance = abs(avgDepthSqr - sqr(avgDepth)); // y abs
+        float chebyshevWeight = variance / (variance + sqr(max(distToProbe - avgDepth, 0.))); // max shouldnt be necessary?
+        chebyshevWeight = max(chebyshevWeight * chebyshevWeight * chebyshevWeight, 0.);
+        weight *= distToProbe <= avgDepth ? 1.0 : 0.;//chebyshevWeight;
+
+        // Accumulate
+        totalIrradiance += weight * sampleIrradiance;
+        totalWeight += weight;
     }
-    #endif
 
-    return c;//float3(id) * 0.1;
+    // float3 c000 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yyy));
+    // float3 c001 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yyx));
+    // float3 c010 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yxy));
+    // float3 c011 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.yxx));
+    // float3 c100 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xyy));
+    // float3 c101 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xyx));
+    // float3 c110 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xxy));
+    // float3 c111 = SampleSh(rd, shCoefficients, probeIDToOffset(probeLayout.probeCounts, id + d.xxx));
+
+    // float3 c00 = lerp(c000, c001, fac.z);
+    // float3 c01 = lerp(c010, c011, fac.z);
+    // float3 c10 = lerp(c100, c101, fac.z);
+    // float3 c11 = lerp(c110, c111, fac.z);
+
+    // float3 c0 = lerp(c00, c01, fac.y);
+    // float3 c1 = lerp(c10, c11, fac.y);
+
+    // float3 c = lerp(c0, c1, fac.x);
+
+    // #if DEBUG_OUT_OF_BOUNDS
+    // if (outOfBounds) {
+    //     c = float3(2., 0., 2.);
+    // }
+    // #endif
+
+    return totalIrradiance / max(1e-5, totalWeight);//float3(id) * 0.1;
 }

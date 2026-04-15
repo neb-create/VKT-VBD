@@ -98,6 +98,6 @@ public float3 SamplePBRSky(float3 wo, float3 worldPos, float3 norm, float3 albed
     return SamplePBR(wo, worldPos, norm, albedo, metallic, roughness, ao, SampleSh(norm, skyboxSh, 0));
 }
 
-public float3 SamplePBREnv(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao, StructuredBuffer<float> sh, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
-    return SamplePBR(wo, worldPos, norm, albedo, metallic, roughness, ao, SampleInterpolatedSh(norm, worldPos, sh, probeLayout));
+public float3 SamplePBREnv(float3 wo, float3 worldPos, float3 norm, float3 albedo, float metallic, float roughness, float ao, StructuredBuffer<float> sh, Sampler2D<float> depthTexture, ConstantBuffer<UProbeVolumeLayout> probeLayout) {
+    return SamplePBR(wo, worldPos, norm, albedo, metallic, roughness, ao, SampleInterpolatedSh(norm, worldPos, sh, depthTexture, probeLayout));
 }

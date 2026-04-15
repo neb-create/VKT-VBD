@@ -72,14 +72,14 @@ float SampleInterpolatedDepth(float3 rd, float3 pos) {
     uint2 d = uint2(1, 0);
 
     float2 uv = DirectionToUV(rd);
-    float c000 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yyy, uv, depthTexture).y;
-    float c001 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yyx, uv, depthTexture).y;
-    float c010 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yxy, uv, depthTexture).y;
-    float c011 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yxx, uv, depthTexture).y;
-    float c100 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xyy, uv, depthTexture).y;
-    float c101 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xyx, uv, depthTexture).y;
-    float c110 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xxy, uv, depthTexture).y;
-    float c111 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xxx, uv, depthTexture).y;
+    float c000 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yyy, uv, depthTexture).x;
+    float c001 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yyx, uv, depthTexture).x;
+    float c010 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yxy, uv, depthTexture).x;
+    float c011 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.yxx, uv, depthTexture).x;
+    float c100 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xyy, uv, depthTexture).x;
+    float c101 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xyx, uv, depthTexture).x;
+    float c110 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xxy, uv, depthTexture).x;
+    float c111 = GetInterpolatedDepthAndSqr(probeLayout.probeCounts, id + d.xxx, uv, depthTexture).x;
 
     float c00 = lerp(c000, c001, fac.z);
     float c01 = lerp(c010, c011, fac.z);

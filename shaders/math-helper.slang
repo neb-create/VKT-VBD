@@ -8,3 +8,7 @@ public float4x4 rotY(float o) {
         0., 0., 0., 1.
     );
 }
+
+public float sqr(float x) {
+    return x * x;
+}
