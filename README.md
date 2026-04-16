@@ -129,3 +129,46 @@ Using a buffer with depth values, no texture so no bilinear filtering.
 Using depth atlas for depth values, so we have bilinear filtering.  (Need to debug the borders but they're not due to incorrect octahedral looping).
 
 
+---
+## 4/15/2026 Update - Correct Occlusion
+
+- Fixed a weird banding issue on the depth probes' octahedral mapping from last time.  Problem was just anisotropic filtering being on.
+- Added depth^2 accumulation to probe depth estimation to allow computation of depth variance (helps since probe depth texels are so big 16x16 per probe only)
+- For choosing probes to use when shading a point, implemented backface weighting to reject probes behind the normal (below diagram)
+
+| ![Alt text](image-1.png) |
+|:--:|
+| Diagram from [GI Blog](https://handmade.network/p/75/monter/blog/p/7288-engine_work__global_illumination_with_irradiance_probes) |
+
+- Also implemented depth based weighting to reject probes that are occluded (shadow mapping-like).  Used depth & depth^2 to construct a smooth falloff based on variance of a probe's depth samples.
+
+![](ShowcaseMedia/badSituationButNoLightLeak.png)
+
+This image is a light leak stress test.  For earlier renders, the probes were set up in a way to avoid possible light leaks, but here, probes are set up in the worst way possible.  There are probes underneath the ceiling and right outside the walls, and the room is thin.  There's still not much light leaking though.
+
+### Problem
+
+- Spherical Harmonics probably have a math issue somewhere still.  Things were messed up before and I did a jank fix which probably didn't actually fix it.  I think that's probably the reason for the light near the window's edge (I don't think it's interpolating from the 'wrong probes').
+
+### Debugging
+
+- Was annoying to debug the depth based weighting so I took pictures of the patterns that the bugs created
+
+![](ShowcaseMedia/p7.png)
+
+![](ShowcaseMedia/p5.png)
+
+![](ShowcaseMedia/p8.png)
+
+![](ShowcaseMedia/p9.png)
+
+![](ShowcaseMedia/p2.png)
+
+![](ShowcaseMedia/p4.png)
+
+### Fixes
+- Not having depth samples splat to neighbor particles seemed to help sometimes?
+- Making sure the depth samples were truncated to the max distance to a probe so that depth samples of the skybox or far away stuff don't dominate and mess with nearby uvs/texels.
+- Sampling bias: push the sampling point along the normal a bit to help the probes on the correct side of the wall and hurt the probes on the other side.
+- Offset the average depth a tiny bit (after sampling from depth texture, increment it a bit).
+
