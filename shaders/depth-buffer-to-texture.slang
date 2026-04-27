@@ -22,7 +22,7 @@ bool eq2(int2 a, int2 b) {
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void main(uint3 id: SV_DispatchThreadID) {
-    if (id.x > probeLayout.probeCounts.x*probeLayout.probeCounts.y*18 || id.y > probeLayout.probeCounts.z*18) {
+    if (id.x >= probeLayout.probeCounts.x*probeLayout.probeCounts.y*18 || id.y >= probeLayout.probeCounts.z*18) {
         return;
     }
 
