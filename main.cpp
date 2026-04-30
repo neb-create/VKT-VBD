@@ -40,8 +40,8 @@ using namespace std;
 using namespace vk::raii;
 using namespace glm;
 
-constexpr uint32_t WIDTH = 800;
-constexpr uint32_t HEIGHT = 600;
+constexpr uint32_t WIDTH = 2000;
+constexpr uint32_t HEIGHT = 1500;
 const string MODEL_PATH = "models/viking_room.obj";
 const string TEXTURE_PATH = "textures/viking_room.png";
 

@@ -427,3 +427,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+VKT.vcxproj
+VKT.vcxproj.filters
+imgui.ini
