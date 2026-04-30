@@ -87,6 +87,9 @@ private:
 
     //
     void TriangulateFace(Face* face);
+
+    // Assumes triangle mesh
+    void TriangleMeshToVertexIndices(vector<vec3>* vertices, vector<vec3>* normals, vector<uint32_t>* indices);
 };
 
 void TriangulateConvexFace(Face* f, vector<vec3>* positions, vector<vec3>* colors, vector<vec3>* normals, vector<uint32_t>* indices);
