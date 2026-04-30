@@ -6,7 +6,6 @@ void VBDManager::Initialize(const VulkanReferences& ref) {
 	this->ref = &ref;
 	this->initialMesh = mkU<HalfEdgeMesh>();
 	initialMesh->LoadFromOBJ("models/tiltedPlane.obj"); // TODO: triangulate all faces for better connectivity?
-	initialMesh->TriangulateAllFaces();
 
 	Bake();
 }

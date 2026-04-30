@@ -250,3 +250,32 @@ void HalfEdgeMesh::TriangulateFace(Face* face) {
     currentEdge->next->face = newFace;
     currentEdge->next->next->face = newFace; newFace->edge = currentEdge->next->next;
 }
+
+// This method assumes mesh is triangles
+// For indices at indices[j*3 + 0], indices[j*3 + 1], indices[j*3 + 2], they correspond to faces[j]
+void HalfEdgeMesh::TriangleMeshToVertexIndices(vector<vec3>* vertices, vector<vec3>* normals, vector<uint32_t>* indices) {
+    for (const uPtr<Face>& f : faces) {
+        vec3 faceNormal = normalize(cross(
+            f->edge->next->nextVertex->pos - f->edge->nextVertex->pos,
+            f->edge->next->next->nextVertex->pos - f->edge->nextVertex->pos));
+
+        HalfEdge* const startEdge = f->edge;
+        if (startEdge->next->next->next != startEdge) {
+            vertices->clear();
+            normals->clear();
+            indices->clear();
+            assert(false);
+            return;
+        }
+
+        HalfEdge* currEdge = startEdge;
+        do {
+            HVertex* v = currEdge->nextVertex;
+            vertices->push_back(v->pos);
+            normals->push_back(faceNormal);
+            indices->push_back(vertices->size() - 1); // 0, 1, 2...
+
+            currEdge = currEdge->next;
+        } while (currEdge != startEdge);
+    }
+}
