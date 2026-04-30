@@ -25,30 +25,34 @@
 #include "vbd-solver.h"
 #include "helper/math.h"
 
-VBDSolver::VBDSolver() : startPoseMesh(nullptr), lastSimulatedMesh(nullptr), lastSimulatedFrame(0) {}
+VBDSolver::VBDSolver() : startPoseMesh(nullptr), lastSimulatedMesh(nullptr), lastSimulatedFrame(0), constrainedVerts(), currMaterial(SIMPLE_SPRING) {}
 
 bool IsConstrained(HVertex* vert) {
 	return abs(vert->pos.x) >= 0.97 && vert->pos.y > -0.01;//vert->pos.y > 0.75f;
 }
 
 void VBDSolver::ResetSimulation(uPtr<HalfEdgeMesh> newStartPoseMesh) {
-	if (newStartPoseMesh != nullptr) {
-		startPoseMesh = std::move(newStartPoseMesh);
-	}
-	if (startPoseMesh == nullptr) {
+	if (newStartPoseMesh == nullptr && startPoseMesh == nullptr) {
 		std::cerr << "ERROR: ResetSimulation called without new start pose mesh when we don't have one!" << std::endl;
+		return;
+	}
+
+	if (newStartPoseMesh != nullptr) {
+		facesInfo.clear();
+		constrainedVerts.clear();
+
+		startPoseMesh = mkU<HalfEdgeMesh>(*newStartPoseMesh);
+		startPoseMesh->TriangulateAllFaces();
+		ComputeFaceInfo();
+
+		for (const uPtr<HVertex>& v : startPoseMesh->vertices) {
+			if (IsConstrained(v.get()))
+				constrainedVerts.insert(v->id);
+		}
 	}
 
 	lastSimulatedFrame = 0;
 	lastSimulatedMesh = mkU<HalfEdgeMesh>(*startPoseMesh); // Copy
-	constrainedVerts.clear();
-	for (const uPtr<HVertex>& v : lastSimulatedMesh->vertices) {
-		if (IsConstrained(v.get()))
-			constrainedVerts.insert(v->id);
-	}
-
-	// TODO: make triangulated/assume triangulated
-	ComputeFaceInfo();
 }
 
 void VBDSolver::SimulateUpToFrame(uint frameIndex) {
@@ -123,7 +127,7 @@ vec3 VBDSolver::PredictPositionCloth(const HalfEdgeMesh& mesh, HVertex* vert, ve
 
 void VBDSolver::ComputeFaceInfo() {
 	// Foreach face, compute restArea and Dm^-1 using basis, record which vertices are which
-	for (const uPtr<Face>& f : lastSimulatedMesh->faces) {
+	for (const uPtr<Face>& f : startPoseMesh->faces) {
 		facesInfo[f->id] = FaceInfo();
 		FaceInfo* fi = &facesInfo[f->id];
 
@@ -140,7 +144,7 @@ void VBDSolver::ComputeFaceInfo() {
 
 		array<vec3, 3> vp = array<vec3, 3>();
 		for (int i = 0; i < 3; i++) {
-			vp[i] = lastSimulatedMesh->vertices[fi->vertIDs[i]]->pos;
+			vp[i] = startPoseMesh->vertices[fi->vertIDs[i]]->pos;
 		}
 
 		// Forming 2D orthonormal basis out of triangle
