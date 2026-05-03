@@ -205,10 +205,10 @@ void HalfEdgeMesh::LoadFromOBJ(const string& fileName) {
     f.close();
 }
 
-size_t VertexPairID(HVertex* a, HVertex* b) {
-    size_t lo = std::min(a->id, b->id);
-    size_t hi = std::max(a->id, b->id);
-    return lo * 2654435761ull ^ hi; // Knuth multiplicative hash
+int VertexPairID(HVertex* a, HVertex* b) {
+    int lo = std::min(a->id, b->id);
+    int hi = std::max(a->id, b->id);
+	return lo * 100000 + hi;
 }
 
 void HalfEdgeMesh::ComputeRestLengths() {

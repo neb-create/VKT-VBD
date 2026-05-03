@@ -19,10 +19,20 @@ void VBDManager::Bake() {
 	ref->graphicsQueue.waitIdle();
 	meshes.clear();
 
+	solver.currMaterial = currMaterialIndex;
+
 	solver.ResetSimulation(mkU<HalfEdgeMesh>(*initialMesh), mkU<HalfEdgeMesh>(*collisionMesh));
 	for (int i = 0; i < frameCount; i++) {
 		solver.SimulateUpToFrame(i);
-		meshes.push_back(std::move(solver.lastSimulatedMesh->convertToMesh(*ref)));
+
+		if (currMaterialIndex <= 1) {
+			// case tri mesh
+			meshes.push_back(std::move(solver.lastSimulatedMesh->convertToMesh(*ref)));
+		}
+		if (currMaterialIndex >= 2) {
+			// case tet mesh
+			meshes.push_back(std::move(solver.lastSimulatedTetMesh->convertToMesh(*ref)));
+		}
 	}
 
 	collisionRenderMesh = solver.collisionMesh ? solver.collisionMesh->convertToMesh(*ref) : nullptr;
@@ -52,10 +62,11 @@ void VBDManager::DrawUI() {
 
 	ImGui::SeparatorText("Physics Material");
 
-	const array<string, 3> materialNames = {
+	const array<string, 4> materialNames = {
 		"Simple Spring",
 		"StVK Cloth",
-		"NeoHook"
+		"Tet Spring",
+		"Tet NeoHook"
 	};
 	if (ImGui::Button(("Physics Material: " + materialNames[currMaterialIndex]).c_str())) {
 		ImGui::OpenPopup("select_physics_material_popup");
@@ -85,6 +96,14 @@ void VBDManager::DrawUI() {
 		ImGui::SliderFloat("Shear Resistance", &solver.u, 0.1f, 100.0f, "%.1f");
 
 		break;
+
+	case 2:
+
+		ImGui::SliderFloat("Spring Constant", &solver.k, 1.0f, 1000.0f, "%.1f");
+		ImGui::SliderFloat("Rest Length", &solver.restLen, 0.01f, 2.0f, "%.2f");
+
+		break;
+
 	}
 
 	ImGui::SeparatorText("Collision");
@@ -92,17 +111,37 @@ void VBDManager::DrawUI() {
 	ImGui::SliderFloat("Collision Threshold", &solver.collisionThreshold, 0.001f, 1.0f, "%.3f");
 	// Collision mesh
 	ImGui::SeparatorText("Collision Mesh");
-	ImGui::InputText("OBJ Path", collisionMeshPath, sizeof(collisionMeshPath));
-	ImGui::SameLine();
-	if (ImGui::Button("Load")) {
-		collisionMesh = mkU<HalfEdgeMesh>();
-		collisionMesh->LoadFromOBJ(collisionMeshPath);
+	ImGui::SameLine(); ImGui::SeparatorText("Collision");
+
+	// Ground Plane
+	ImGui::Checkbox("Ground Plane", &solver.enableCollisionPlane);
+	if (solver.enableCollisionPlane) {
+		ImGui::SetNextItemWidth(150);
+		ImGui::SliderFloat("Height##plane", &solver.planeHeight, -10.0f, 10.0f, "%.2f");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(150);
+		ImGui::SliderFloat("Tilt##plane", &solver.planeTilt, -45.0f, 45.0f, "%.1f");
 	}
-	ImGui::SeparatorText("Collision Offset");
-	ImGui::SliderFloat("Offset X", &solver.collisionOffset.x, -5.0f, 5.0f, "%.3f");
-	ImGui::SliderFloat("Offset Y", &solver.collisionOffset.y, -5.0f, 5.0f, "%.3f");
-	ImGui::SliderFloat("Offset Z", &solver.collisionOffset.z, -5.0f, 5.0f, "%.3f");
-	ImGui::Checkbox("Enable Collision Mesh", &solver.enableCollisionMesh);
+
+	// Collision Mesh
+	ImGui::Checkbox("Collision Mesh", &solver.enableCollisionMesh);
+	if (solver.enableCollisionMesh) {
+		ImGui::InputText("OBJ Path", collisionMeshPath, sizeof(collisionMeshPath));
+		ImGui::SameLine();
+		if (ImGui::Button("Load")) {
+			solver.collisionMesh = mkU<HalfEdgeMesh>();
+			solver.collisionMesh->LoadFromOBJ(collisionMeshPath);
+			collisionRenderMesh = solver.collisionMesh->convertToMesh(*ref);
+		}
+		ImGui::SetNextItemWidth(150);
+		ImGui::SliderFloat("X##offset", &solver.collisionOffset.x, -5.0f, 5.0f, "%.2f");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(150);
+		ImGui::SliderFloat("Y##offset", &solver.collisionOffset.y, -5.0f, 5.0f, "%.2f");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(150);
+		ImGui::SliderFloat("Z##offset", &solver.collisionOffset.z, -5.0f, 5.0f, "%.2f");
+	}
 
 	ImGui::End();
 }

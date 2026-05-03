@@ -28,7 +28,7 @@
 VBDSolver::VBDSolver() : startPoseMesh(nullptr), lastSimulatedMesh(nullptr), lastSimulatedFrame(0), constrainedVerts(), currMaterial(SIMPLE_SPRING) {}
 
 bool IsConstrained(HVertex* vert) {
-	return false; // abs(vert->pos.x) >= 0.97 && vert->pos.y > -0.01;//vert->pos.y > 0.75f;
+	return false;// abs(vert->pos.x) >= 0.97 && vert->pos.y > -0.01;//vert->pos.y > 0.75f;
 }
 
 void VBDSolver::ResetSimulation(uPtr<HalfEdgeMesh> newStartPoseMesh, uPtr<HalfEdgeMesh> collisionMeshSource) {
@@ -37,7 +37,7 @@ void VBDSolver::ResetSimulation(uPtr<HalfEdgeMesh> newStartPoseMesh, uPtr<HalfEd
 		return;
 	}
 
-	if (currMaterial == 2) {
+	if (currMaterial >= 2) {
 		useTetMesh = true;
 	}
 	else {
@@ -49,23 +49,40 @@ void VBDSolver::ResetSimulation(uPtr<HalfEdgeMesh> newStartPoseMesh, uPtr<HalfEd
 		constrainedVerts.clear();
 		startPoseMesh = mkU<HalfEdgeMesh>(*newStartPoseMesh);
 		startPoseMesh->TriangulateAllFaces();
-		startPoseMesh->ComputeRestLengths();
-		ComputeFaceInfo();
+
+		if (currMaterial == SIMPLE_SPRING) {
+			startPoseMesh->ComputeRestLengths();
+		}
+
+		if (currMaterial == STVK_CLOTH) {
+			ComputeClothFaceInfo();
+		}
+
 		for (const uPtr<HVertex>& v : startPoseMesh->vertices) {
 			if (IsConstrained(v.get()))
 				constrainedVerts.insert(v->id);
 		}
+		if (useTetMesh) {
+			startPoseTetMesh = mkU<TetMesh>();
+			startPoseTetMesh->FromHalfEdge(*startPoseMesh);
+		}
 	}
 
-	if (collisionMeshSource != nullptr) {
+	if (enableCollisionMesh && collisionMeshSource != nullptr) {
 		collisionMesh = mkU<HalfEdgeMesh>(*collisionMeshSource);
 		collisionMesh->TriangulateAllFaces();
 		collisionMesh->Translate(collisionOffset);
-		enableCollisionMesh = true;
 	}
 
 	lastSimulatedFrame = 0;
 	lastSimulatedMesh = mkU<HalfEdgeMesh>(*startPoseMesh); // Copy
+
+	if (useTetMesh) {
+
+		lastSimulatedTetMesh = mkU<TetMesh>(*startPoseTetMesh); // Copy
+		lastSimulatedTetMesh->PreCompute();
+
+	}
 }
 
 void VBDSolver::SimulateUpToFrame(uint frameIndex) {
@@ -118,20 +135,15 @@ void VBDSolver::ComputeTriangleCollision(HVertex* vert, HVertex* a, HVertex* b, 
 	}
 }
 
-vec3 VBDSolver::PredictPosition(HVertex* vert, vec3 externalPos) {
-	if (constrainedVerts.count(vert->id) != 0) return vert->pos;
+void VBDSolver::ComputeCollisionForceAndHessian(HVertex* vert, vec3& collisionForce, mat3& collisionHessian) {
 
-	vec3 inertiaForce = -m / (dt * dt) * (vert->pos - externalPos);
-	mat3 inertiaHessian = m / (dt * dt) * glm::identity<mat3>();
+	// plane collision
+	if (enableCollisionPlane) {
+		vec3 planeNormal = normalize(vec3(sin(glm::radians(planeTilt)), cos(glm::radians(planeTilt)), 0.0f));
+		vec3 planePoint = vec3(0, planeHeight, 0);
+		ComputePlaneCollision(planeNormal, planePoint, vert, collisionForce, collisionHessian);
+	}
 
-	vec3 neighborForce = vec3(0);
-	mat3 neighborHessian = mat3(0);
-
-	vec3 collisionForce = vec3(0);
-	mat3 collisionHessian = mat3(0);
-
-	ComputePlaneCollision(vec3(0, 1, 0), vec3(0, -3, 0), vert, collisionForce, collisionHessian);
-	
 	// collision against mesh triangles
 	if (enableCollisionMesh && collisionMesh != nullptr) {
 		for (const uPtr<Face>& f : collisionMesh->faces) {
@@ -141,70 +153,26 @@ vec3 VBDSolver::PredictPosition(HVertex* vert, vec3 externalPos) {
 			HVertex* c = f->edge->next->next->nextVertex;
 			ComputeTriangleCollision(vert, a, b, c, collisionForce, collisionHessian);
 		}
+
+		// self intersection (DISABLED ATM)
+		//for (const uPtr<Face>& f : lastSimulatedMesh->faces) {
+		//	HVertex* a = f->edge->nextVertex;
+		//	HVertex* b = f->edge->next->nextVertex;
+		//	HVertex* c = f->edge->next->next->nextVertex;
+		//	ComputeTriangleCollision(vert, a, b, c, collisionForce, collisionHessian);
+		//}
+
 	}
 
-	HalfEdge* currEdge = vert->incomingEdge;
-	do {
-		HVertex* neighborVert = currEdge->sym->nextVertex;
-
-		vec3 d = vert->pos - neighborVert->pos;
-		float l = length(d);
-		vec3 dNormalized = normalize(d);
-		mat3 dNormalizedOuterProd = glm::outerProduct(dNormalized, dNormalized);
-
-		float edgeRestLength = startPoseMesh->GetRestLength(vert, neighborVert) * restLen;
-
-		neighborForce += -k * (l - edgeRestLength) * dNormalized;
-		neighborHessian += k * (dNormalizedOuterProd + (1.0f / l) * (l - edgeRestLength) * (glm::identity<mat3>() - dNormalizedOuterProd));
-
-		currEdge = currEdge->next->sym;
-	} while (currEdge != vert->incomingEdge);
-
-	//inertiaForce = vec3(0);
-	//inertiaHessian = mat3(0);
-
-	//neighborForce = vec3(0);
-	//neighborHessian = mat3(0);
-
-	//collisionForce = vec3(0);
-	//collisionHessian = mat3(0);
-
-	vec3 force = inertiaForce + neighborForce + collisionForce;
-	mat3 hessian = inertiaHessian + neighborHessian + collisionHessian;
-
-	vec3 deltaX = glm::inverse(hessian) * force;
-	return vert->pos + deltaX;
 }
 
-vec3 VBDSolver::PredictPositionCloth(const HalfEdgeMesh& mesh, HVertex* vert, vec3 externalPos) {
-	if (constrainedVerts.count(vert->id) != 0) return vert->pos;
-
-	vec3 inertiaForce = -m / (dt * dt) * (vert->pos - externalPos);
-	mat3 inertiaHessian = m / (dt * dt) * glm::identity<mat3>();
-
-	vec3 neighborForce = vec3(0);
-	mat3 neighborHessian = mat3(0);
-
-	HalfEdge* currEdge = vert->incomingEdge;
-	do {
-		Face* currFace = currEdge->face;
-
-		neighborForce += ComputeForce(mesh, currFace, vert);
-		neighborHessian += ComputeHessian(mesh, currFace, vert);
-
-		currEdge = currEdge->next->sym;
-	} while (currEdge != vert->incomingEdge);
-
-	vec3 force = inertiaForce + neighborForce;
-	mat3 hessian = inertiaHessian + neighborHessian;
-	// if (dot(force, force) <= 0.1f) return vert->pos;
-
-	vec3 deltaX = glm::inverse(hessian) * force;
-	// if (dot(deltaX, deltaX) >= 2.0f) return vert->pos;
-	return vert->pos + deltaX;
+void VBDSolver::ComputeInertiaForceAndHessian(vec3 pos, vec3 externalPos, vec3& inertiaForce, mat3& inertiaHessian) {
+	inertiaForce = -m / (dt * dt) * (pos - externalPos);
+	inertiaHessian = m / (dt * dt) * glm::identity<mat3>();
 }
 
-void VBDSolver::ComputeFaceInfo() {
+
+void VBDSolver::ComputeClothFaceInfo() {
 	// Foreach face, compute restArea and Dm^-1 using basis, record which vertices are which
 	for (const uPtr<Face>& f : startPoseMesh->faces) {
 		facesInfo[f->id] = FaceInfo();
@@ -245,7 +213,7 @@ void VBDSolver::ComputeFaceInfo() {
 	}
 }
 
-mat3 VBDSolver::ComputeHessian(const HalfEdgeMesh& mesh, Face* face, HVertex* v) {
+mat3 VBDSolver::ComputeClothNeighborHessian(const HalfEdgeMesh& mesh, Face* face, HVertex* v) {
 	//
 	const FaceInfo& fInfo = facesInfo[face->id];
 	array<vec3, 3> vp;
@@ -283,12 +251,12 @@ mat3 VBDSolver::ComputeHessian(const HalfEdgeMesh& mesh, Face* face, HVertex* v)
 		}
 
 		// dx/dX, change in world space pos per change in rest space pos
-		mat2x3 deformationMat = mat2x3(vp[1]-vp[0], vp[2]-vp[0]) * fInfo.invRestShape;
+		mat2x3 deformationMat = mat2x3(vp[1] - vp[0], vp[2] - vp[0]) * fInfo.invRestShape;
 		mat2x3 dDeformationMat = dDs * fInfo.invRestShape;
-		
+
 		mat2x2 strain = 0.5f * (transpose(deformationMat) * deformationMat - glm::identity<mat2x2>());
 		mat2x2 dStrain = 0.5f * (transpose(dDeformationMat) * deformationMat + transpose(deformationMat) * dDeformationMat);
-		
+
 		mat2x3 dStress = dDeformationMat * (2 * u * strain + lambda * trace(strain) * glm::identity<mat2x2>()) + deformationMat * (2 * u * dStrain + lambda * trace(dStrain) * glm::identity<mat2x2>());
 		vec3 df = -fInfo.restArea * dStress * g;
 
@@ -298,7 +266,7 @@ mat3 VBDSolver::ComputeHessian(const HalfEdgeMesh& mesh, Face* face, HVertex* v)
 	return hessian;
 }
 
-vec3 VBDSolver::ComputeForce(const HalfEdgeMesh& mesh, Face* face, HVertex* v) {
+vec3 VBDSolver::ComputeClothNeighborForce(const HalfEdgeMesh& mesh, Face* face, HVertex* v) {
 	//
 	const FaceInfo& fInfo = facesInfo[face->id];
 	array<vec3, 3> vp;
@@ -337,11 +305,204 @@ vec3 VBDSolver::ComputeForce(const HalfEdgeMesh& mesh, Face* face, HVertex* v) {
 	return f;
 }
 
-void VBDSolver::SimulateOneFrame() {
+
+vec3 VBDSolver::PredictPosition(HVertex* vert, vec3 externalPos) {
+	if (constrainedVerts.count(vert->id) != 0) return vert->pos;
+
+	vec3 inertiaForce = vec3(0); mat3 inertiaHessian = mat3(0);
+	ComputeInertiaForceAndHessian(vert->pos, externalPos, inertiaForce, inertiaHessian);
+
+	vec3 neighborForce = vec3(0);
+	mat3 neighborHessian = mat3(0);
+	HalfEdge* currEdge = vert->incomingEdge;
+	do {
+		HVertex* neighborVert = currEdge->sym->nextVertex;
+
+		vec3 d = vert->pos - neighborVert->pos;
+		float l = length(d);
+		vec3 dNormalized = normalize(d);
+		mat3 dNormalizedOuterProd = glm::outerProduct(dNormalized, dNormalized);
+
+		float edgeRestLength = startPoseMesh->GetRestLength(vert, neighborVert) * restLen;
+
+		neighborForce += -k * (l - edgeRestLength) * dNormalized;
+		neighborHessian += k * (dNormalizedOuterProd + (1.0f / l) * (l - edgeRestLength) * (glm::identity<mat3>() - dNormalizedOuterProd));
+
+		currEdge = currEdge->next->sym;
+	} while (currEdge != vert->incomingEdge);
+
+	vec3 collisionForce = vec3(0);  mat3 collisionHessian = mat3(0);
+	ComputeCollisionForceAndHessian(vert, collisionForce, collisionHessian);
+
+	vec3 force = inertiaForce + neighborForce + collisionForce;
+	mat3 hessian = inertiaHessian + neighborHessian + collisionHessian;
+
+	vec3 deltaX = glm::inverse(hessian) * force;
+	return vert->pos + deltaX;
+}
+
+vec3 VBDSolver::PredictPositionCloth(const HalfEdgeMesh& mesh, HVertex* vert, vec3 externalPos) {
+	if (constrainedVerts.count(vert->id) != 0) return vert->pos;
+
+	vec3 inertiaForce = vec3(0); mat3 inertiaHessian = mat3(0);
+	ComputeInertiaForceAndHessian(vert->pos, externalPos, inertiaForce, inertiaHessian);
+
+	vec3 neighborForce = vec3(0);
+	mat3 neighborHessian = mat3(0);
+
+	vec3 collisionForce = vec3(0);  mat3 collisionHessian = mat3(0);
+	ComputeCollisionForceAndHessian(vert, collisionForce, collisionHessian);
+
+	HalfEdge* currEdge = vert->incomingEdge;
+	do {
+		Face* currFace = currEdge->face;
+
+		neighborForce += ComputeClothNeighborForce(mesh, currFace, vert);
+		neighborHessian += ComputeClothNeighborHessian(mesh, currFace, vert);
+
+		currEdge = currEdge->next->sym;
+	} while (currEdge != vert->incomingEdge);
+
+	vec3 force = inertiaForce + neighborForce + collisionForce;
+	mat3 hessian = inertiaHessian + neighborHessian + collisionHessian;
+	// if (dot(force, force) <= 0.1f) return vert->pos;
+
+	vec3 deltaX = glm::inverse(hessian) * force;
+	// if (dot(deltaX, deltaX) >= 2.0f) return vert->pos;
+	return vert->pos + deltaX;
+}
+
+vec3 VBDSolver::PredictPositionTetSpring(HVertex* vert, vec3 externalPos) {
+	//if (constrainedVerts.count(vert->id) != 0) return vert->pos;
+
+	vec3 inertiaForce = vec3(0); mat3 inertiaHessian = mat3(0);
+	ComputeInertiaForceAndHessian(vert->pos, externalPos, inertiaForce, inertiaHessian);
+
+	vec3 neighborForce = vec3(0);
+	mat3 neighborHessian = mat3(0);
+
+	// Collision Force and Hessian
+	vec3 collisionForce = vec3(0); mat3 collisionHessian = mat3(0);
+	if (vert->isSurface) {
+		ComputeCollisionForceAndHessian(vert, collisionForce, collisionHessian);
+	}
+
+	// Neighbor spring forces: Find every neighbor in Tetmesh;
+	for (HVertex* neighborVert : lastSimulatedTetMesh->vertexNeighbors[vert->id]) {
+
+		vec3 d = vert->pos - neighborVert->pos;
+		float l = length(d);
+		vec3 dNormalized = normalize(d);
+		mat3 dNormalizedOuterProd = glm::outerProduct(dNormalized, dNormalized);
+
+		float edgeRestLength = lastSimulatedTetMesh->restLengths[VertexPairID(vert, neighborVert)] * restLen;
+
+		neighborForce += -k * (l - edgeRestLength) * dNormalized;
+		neighborHessian += k * (dNormalizedOuterProd + (1.0f / l) * (l - edgeRestLength) * (glm::identity<mat3>() - dNormalizedOuterProd));
+
+	}
+
+	vec3 force = inertiaForce + neighborForce + collisionForce;
+	mat3 hessian = inertiaHessian + neighborHessian + collisionHessian;
+
+	vec3 deltaX = glm::inverse(hessian) * force;
+	return vert->pos + deltaX;
+}
+
+void VBDSolver::ComputeNeoHookForceAndHessian(HVertex* vert, Tet* tet, vec3& force, mat3& hessian) {
+
+	// Todo, below is temp instruction from llm
+
+	// 1. Compute deformation gradient F = Ds * DmInv
+	//    where Ds = [v1-v0, v2-v0, v3-v0] from current positions
+
+	// 2. Compute J = det(F)
+	//    J < 0 means tet is inverted, may need handling
+
+	// 3. Compute dE/dF (the first Piola-Kirchhoff stress P)
+	//    P = mu * (F - F^-T) + lambda * ln(J) * F^-T
+
+	// 4. Compute per-vertex force contribution via chain rule
+	//    H = P * DmInv^T  (3x3 matrix)
+	//    force on v1 += -H * [1,0,0]^T
+	//    force on v2 += -H * [0,1,0]^T
+	//    force on v3 += -H * [0,0,1]^T
+	//    force on v0 += -(force_v1 + force_v2 + force_v3)
+	//    only accumulate the contribution for `vert`
+
+	// 5. Compute per-vertex hessian contribution
+	//    This is the hard part — see Smith et al. 2018 section 4
+	//    Result is a 3x3 matrix accumulated into hessian
+
+}
+
+vec3 VBDSolver::PredictPositionTetNeoHook(HVertex* vert, vec3 externalPos) {
+
+	// Inertia Force and Hessian
+	vec3 inertiaForce = vec3(0); mat3 inertiaHessian = mat3(0);
+	ComputeInertiaForceAndHessian(vert->pos, externalPos, inertiaForce, inertiaHessian);
+
+	// NeoHookean Force and Hessian
+	vec3 neoHookForce = vec3(0); mat3 neoHookHessian = mat3(0);
+	for (Tet* tet : lastSimulatedTetMesh->vertexTets[vert->id]) {
+		ComputeNeoHookForceAndHessian(vert, tet, neoHookForce, neoHookHessian);
+	}
+
+	// Collision Force and Hessian
+	vec3 collisionForce = vec3(0); mat3 collisionHessian = mat3(0);
+	if (vert->isSurface) {
+		ComputeCollisionForceAndHessian(vert, collisionForce, collisionHessian);
+	}
+
+	vec3 force = inertiaForce + neoHookForce + collisionForce;
+	mat3 hessian = inertiaHessian + neoHookHessian + collisionHessian;
+
+	vec3 deltaX = glm::inverse(hessian) * force;
+	return vert->pos + deltaX;
+}
+
+void VBDSolver::SimulateOneFrameTet() {
+	if (lastSimulatedTetMesh == nullptr) {
+		std::cerr << "ERROR: SimulateOneFrameTet() called with no lastSimulatedMesh" << std::endl;
+	}
+
+	// Predict external positions & save positions
+	vector<vec3> oldPositions(lastSimulatedTetMesh->vertices.size());
+	vector<vec3> externalPredictedPositions(lastSimulatedTetMesh->vertices.size());
+	for (int i = 0; i < lastSimulatedTetMesh->vertices.size(); i++) {
+		vec3 externalAcc = g;
+		oldPositions[i] = lastSimulatedTetMesh->vertices[i]->pos;
+		externalPredictedPositions[i] = lastSimulatedTetMesh->vertices[i]->pos + lastSimulatedTetMesh->vertices[i]->vel * dt + externalAcc * dt * dt;
+	}
+
+	for (int j = 0; j < iterCount; j++) {
+		for (int i = 0; i < lastSimulatedTetMesh->vertices.size(); i++) {
+			HVertex* v = lastSimulatedTetMesh->vertices[i].get();
+
+			switch (currMaterial) {
+			case TET_SPRING:
+				v->pos = PredictPositionTetSpring(v, externalPredictedPositions[i]);
+				break;
+
+			case TET_NEOHOOK:
+				v->pos = PredictPositionTetNeoHook(v, externalPredictedPositions[i]);
+				break;
+			}
+		}
+	}
+
+	for (int i = 0; i < lastSimulatedTetMesh->vertices.size(); i++) {
+		HVertex* v = lastSimulatedTetMesh->vertices[i].get();
+		v->vel = (1.0f / dt) * (v->pos - oldPositions[i]);
+		v->vel *= 0.98f; // DAMPING
+	}
+
+}
+
+void VBDSolver::SimulateOneFrameTri() {
 	if (lastSimulatedMesh == nullptr) {
 		std::cerr << "ERROR: SimulateOneFrame() called with no lastSimulatedMesh" << std::endl;
 	}
-	lastSimulatedFrame++;
 
 	// Predict external positions & save positions
 	vector<vec3> oldPositions(lastSimulatedMesh->vertices.size());
@@ -352,7 +513,7 @@ void VBDSolver::SimulateOneFrame() {
 		externalPredictedPositions[i] = lastSimulatedMesh->vertices[i]->pos + lastSimulatedMesh->vertices[i]->vel * dt + externalAcc * dt * dt;
 	}
 
-	for (int i = 0; i < iterCount; i++) {
+	for (int j = 0; j < iterCount; j++) {
 		for (int i = 0; i < lastSimulatedMesh->vertices.size(); i++) {
 			HVertex* v = lastSimulatedMesh->vertices[i].get();
 
@@ -373,6 +534,18 @@ void VBDSolver::SimulateOneFrame() {
 		v->vel = (1.0f / dt) * (v->pos - oldPositions[i]);
 		// v->pos = oldPositions[i] + 0.98f * v->vel * dt; // I dont think this is the right way to do DAMPING
 		v->vel *= 0.98f; // DAMPING
+	}
+}
+
+void VBDSolver::SimulateOneFrame() {
+
+	lastSimulatedFrame++;
+
+	if (useTetMesh) {
+		SimulateOneFrameTet();
+	}
+	else {
+		SimulateOneFrameTri();
 	}
 
 }

@@ -13,15 +13,27 @@ struct Tet {
 };
 
 class TetMesh {
+
+
+public:
+
     vector<uPtr<HVertex>> vertices;
     vector<Tet> tets;
     vector<array<uint32_t, 3>> surfaceTris;
 
+    unordered_map<uint64_t, float> restLengths;
+    unordered_map<uint32_t, vector<HVertex*>> vertexNeighbors;
+    unordered_map<uint32_t, vector<Tet*>> vertexTets;
+
+    void PreCompute();
+
+    TetMesh() = default;
+    TetMesh(const TetMesh&);
+
+	friend class VBDSolver;
+
     // Build from TetGen output
     void FromTetgenOutput(const tetgenio& out);
-
-    // Precompute DmInv for each tet from current positions (call once at rest pose)
-    void ComputeRestPose();
 
     // Extract surface as flat arrays for rendering
     void ToRenderArrays(vector<vec3>* outPositions, vector<vec3>* outNormals, vector<uint32_t>* outIndices);
@@ -30,4 +42,8 @@ class TetMesh {
     void FromHalfEdge(const HalfEdgeMesh& heMesh);
     uPtr<HalfEdgeMesh> ToHalfEdge() const;
 
+    uPtr<Mesh> convertToMesh(const VulkanReferences& ref);
+
 };
+
+int VertexPairID(HVertex* a, HVertex* b);

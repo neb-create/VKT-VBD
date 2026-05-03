@@ -13,6 +13,8 @@ public:
 
 	vector<uPtr<Mesh>> meshes;
 	uPtr<Mesh> collisionRenderMesh;
+
+	bool IsSolverUsingCollisionMesh() { return solver.enableCollisionMesh; };
 private:
 	void Bake();
 
@@ -22,6 +24,6 @@ private:
 	const VulkanReferences* ref;
 	VBDSolver solver;
 
-	int frameCount = 250;
+	int frameCount = 10;
 	int currMaterialIndex = 0;
 };

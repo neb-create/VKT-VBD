@@ -1079,7 +1079,7 @@ private:
             renderPass.EnqueueDraw(*vbdManager.meshes[timeIndex]);
 		}
 
-        if (vbdManager.collisionRenderMesh) {
+        if (vbdManager.IsSolverUsingCollisionMesh() && vbdManager.collisionRenderMesh) {
             renderPass.EnqueueSetMaterial(vbdMaterial, currFrameIndex, { 1 });
             renderPass.EnqueueDraw(*vbdManager.collisionRenderMesh);
         }

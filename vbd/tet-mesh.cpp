@@ -1,6 +1,32 @@
 #include "tet-mesh.h"
 
+#include <iostream>
+
+
+TetMesh::TetMesh(const TetMesh& other) {
+
+    for (const uPtr<HVertex>& v : other.vertices) {
+        vertices.push_back(mkU<HVertex>(*v));
+    }
+
+    for (const Tet& t : other.tets) {
+        Tet newTet;
+        newTet.DmInv = t.DmInv;
+        for (int i = 0; i < 4; i++) {
+            newTet.v[i] = vertices[t.v[i]->id].get();
+        }
+        tets.push_back(newTet);
+    }
+
+    surfaceTris = other.surfaceTris;
+}
+
 void TetMesh::FromTetgenOutput(const tetgenio& out) {
+
+    std::cout << "FromTetgenOutput: " << out.numberofpoints << " points, "
+        << out.numberoftetrahedra << " tets, "
+        << out.numberoftrifaces << " trifaces" << std::endl;
+
     vertices.clear();
     tets.clear();
     surfaceTris.clear();
@@ -35,17 +61,46 @@ void TetMesh::FromTetgenOutput(const tetgenio& out) {
             });
     }
 
-    ComputeRestPose();
+    // set is surface flag
+    for (auto& v : vertices) {
+        v->isSurface = false;
+    }
+    for (int i = 0; i < out.numberoftrifaces; i++) {
+        for (int j = 0; j < 3; j++) {
+            vertices[out.trifacelist[i * 3 + j]]->isSurface = true;
+        }
+    }
+
+    PreCompute();
 }
 
-void TetMesh::ComputeRestPose() {
-    for (Tet& t : tets) {
-        // Dm = [v1-v0, v2-v0, v3-v0]
-        vec3 col0 = t.v[1]->pos - t.v[0]->pos;
-        vec3 col1 = t.v[2]->pos - t.v[0]->pos;
-        vec3 col2 = t.v[3]->pos - t.v[0]->pos;
+void TetMesh::PreCompute() {
+    const int tetEdges[6][2] = { {0,1},{0,2},{0,3},{1,2},{1,3},{2,3} };
+    for (Tet& tet : tets) {
+
+        // Edges + rest lengths + neighbors
+        for (auto& e : tetEdges) {
+            HVertex* va = tet.v[e[0]];
+            HVertex* vb = tet.v[e[1]];
+            uint64_t key = VertexPairID(va, vb);
+            if (restLengths.count(key) == 0) {
+                restLengths[key] = glm::length(va->pos - vb->pos);
+                vertexNeighbors[va->id].push_back(vb);
+                vertexNeighbors[vb->id].push_back(va);
+            }
+        }
+
+        // DmInv
+        vec3 col0 = tet.v[1]->pos - tet.v[0]->pos;
+        vec3 col1 = tet.v[2]->pos - tet.v[0]->pos;
+        vec3 col2 = tet.v[3]->pos - tet.v[0]->pos;
         mat3 Dm = mat3(col0, col1, col2);
-        t.DmInv = glm::inverse(Dm);
+        tet.DmInv = glm::inverse(Dm);
+
+        // Vertex tet map
+        for (int i = 0; i < 4; i++) {
+            vertexTets[tet.v[i]->id].push_back(&tet);
+        }
     }
 }
 
@@ -56,8 +111,8 @@ void TetMesh::ToRenderArrays(vector<vec3>* outPositions, vector<vec3>* outNormal
 
     for (const auto& tri : surfaceTris) {
         vec3 a = vertices[tri[0]]->pos;
-        vec3 b = vertices[tri[1]]->pos;
-        vec3 c = vertices[tri[2]]->pos;
+        vec3 b = vertices[tri[2]]->pos;
+        vec3 c = vertices[tri[1]]->pos;
 
         vec3 normal = normalize(cross(b - a, c - a));
 
@@ -75,45 +130,51 @@ void TetMesh::ToRenderArrays(vector<vec3>* outPositions, vector<vec3>* outNormal
 }
 
 void TetMesh::FromHalfEdge(const HalfEdgeMesh& heMesh) {
-    // Extract vertices and indices from half-edge mesh
-    vector<vec3> positions;
-    vector<vec3> normals;
-    vector<uint32_t> indices;
-    const_cast<HalfEdgeMesh&>(heMesh).TriangleMeshToVertexIndices(&positions, &normals, &indices);
+    std::cout << "Vertices: " << heMesh.vertices.size() << std::endl;
+    std::cout << "Faces: " << heMesh.faces.size() << std::endl;
 
-    // Fill TetGen input
     tetgenio in, out;
-    in.numberofpoints = positions.size();
+
+    // Use unique vertices directly
+    in.numberofpoints = heMesh.vertices.size();
     in.pointlist = new REAL[in.numberofpoints * 3];
-    for (int i = 0; i < positions.size(); i++) {
-        in.pointlist[i * 3 + 0] = positions[i].x;
-        in.pointlist[i * 3 + 1] = positions[i].y;
-        in.pointlist[i * 3 + 2] = positions[i].z;
+    for (int i = 0; i < heMesh.vertices.size(); i++) {
+        in.pointlist[i * 3 + 0] = heMesh.vertices[i]->pos.x;
+        in.pointlist[i * 3 + 1] = heMesh.vertices[i]->pos.y;
+        in.pointlist[i * 3 + 2] = heMesh.vertices[i]->pos.z;
     }
 
-    in.numberoffacets = indices.size() / 3;
+    // Build face list from half-edge faces
+    in.numberoffacets = heMesh.faces.size();
     in.facetlist = new tetgenio::facet[in.numberoffacets];
     in.facetmarkerlist = new int[in.numberoffacets];
-    for (int i = 0; i < in.numberoffacets; i++) {
-        tetgenio::facet& f = in.facetlist[i];
-        f.numberofpolygons = 1;
-        f.polygonlist = new tetgenio::polygon[1];
-        f.numberofholes = 0;
-        f.holelist = nullptr;
-        tetgenio::polygon& p = f.polygonlist[0];
+    for (int i = 0; i < heMesh.faces.size(); i++) {
+        Face* f = heMesh.faces[i].get();
+        HVertex* a = f->edge->nextVertex;
+        HVertex* b = f->edge->next->nextVertex;
+        HVertex* c = f->edge->next->next->nextVertex;
+
+        tetgenio::facet& tf = in.facetlist[i];
+        tf.numberofpolygons = 1;
+        tf.polygonlist = new tetgenio::polygon[1];
+        tf.numberofholes = 0;
+        tf.holelist = nullptr;
+        tetgenio::polygon& p = tf.polygonlist[0];
         p.numberofvertices = 3;
         p.vertexlist = new int[3];
-        p.vertexlist[0] = indices[i * 3 + 0];
-        p.vertexlist[1] = indices[i * 3 + 1];
-        p.vertexlist[2] = indices[i * 3 + 2];
+        p.vertexlist[0] = a->id;
+        p.vertexlist[1] = b->id;
+        p.vertexlist[2] = c->id;
         in.facetmarkerlist[i] = 0;
     }
 
     tetgenbehavior b;
     b.parse_commandline((char*)"pq1.4Y");
-    tetrahedralize(&b, &in, &out);
 
-    // Build TetMesh from output
+    std::cout << "Calling tetrahedralize..." << std::endl;
+    tetrahedralize(&b, &in, &out);
+    std::cout << "Done. Points: " << out.numberofpoints << " Tets: " << out.numberoftetrahedra << std::endl;
+
     FromTetgenOutput(out);
 }
 
@@ -123,6 +184,7 @@ uPtr<HalfEdgeMesh> TetMesh::ToHalfEdge() const {
 
     // Add vertices
     for (const auto& v : vertices) {
+        if (!v->isSurface) continue;
         auto newVert = mkU<HVertex>();
         newVert->pos = v->pos;
         newVert->id = v->id;
@@ -166,4 +228,23 @@ uPtr<HalfEdgeMesh> TetMesh::ToHalfEdge() const {
     }
 
     return heMesh;
+}
+
+uPtr<Mesh> TetMesh::convertToMesh(const VulkanReferences& ref) {
+    vector<vec3> positions;
+    vector<vec3> normals;
+    vector<vec3> colors;
+    vector<uint32_t> indices;
+    ToRenderArrays(&positions, &normals, &indices);
+
+    for (auto& v : positions) {
+
+        colors.push_back(vec3(1.0f, 1.0f, 1.0f));
+
+    }
+
+
+    uPtr<Mesh> mesh = mkU<Mesh>();
+    mesh->CreateFromArrays(ref, positions, colors, normals, indices);
+    return mesh;
 }

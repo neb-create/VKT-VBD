@@ -15,6 +15,8 @@ struct HVertex {
     vec3 pos;
     HalfEdge* incomingEdge;
 
+    bool isSurface = true;
+
     vec3 vel;
 };
 
@@ -105,3 +107,6 @@ private:
 };
 
 void TriangulateConvexFace(Face* f, vector<vec3>* positions, vector<vec3>* colors, vector<vec3>* normals, vector<uint32_t>* indices);
+
+// !!! IMPORTANT !!! //
+int VertexPairID(HVertex* a, HVertex* b);
