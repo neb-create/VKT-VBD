@@ -45,8 +45,20 @@ public:
     void LoadFromOBJ(const string&);
     uPtr<Mesh> convertToMesh(const VulkanReferences&);
     void TriangulateAllFaces();
+	int GetVertexCount() const { return vertices.size(); }
+	int GetFaceCount() const { return faces.size(); }
+
+    void Translate(vec3 offset);
+    void Scale(vec3 scale);
+
+    float GetRestLength(HVertex* a, HVertex* b);
+
 private:
     friend class VBDSolver;
+    friend class TetMesh;
+
+    unordered_map<int, float> restLengths;
+    void ComputeRestLengths();
 
     uint pointCountBound;
     vector<uPtr<HVertex>> vertices;

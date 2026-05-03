@@ -5,20 +5,28 @@
 void VBDManager::Initialize(const VulkanReferences& ref) {
 	this->ref = &ref;
 	this->initialMesh = mkU<HalfEdgeMesh>();
-	initialMesh->LoadFromOBJ("models/tiltedPlane.obj"); // TODO: triangulate all faces for better connectivity?
+	this->collisionMesh = mkU<HalfEdgeMesh>();
+	initialMesh->LoadFromOBJ("models/sphere.obj"); // TODO: triangulate all faces for better connectivity?
 
-	Bake();
+	collisionMesh->LoadFromOBJ(collisionMeshPath);
+	solver.enableCollisionMesh;
+
+	//Bake();
 }
 
 void VBDManager::Bake() {
+
 	ref->graphicsQueue.waitIdle();
 	meshes.clear();
 
-	solver.ResetSimulation(std::move(initialMesh));
+	solver.ResetSimulation(mkU<HalfEdgeMesh>(*initialMesh), mkU<HalfEdgeMesh>(*collisionMesh));
 	for (int i = 0; i < frameCount; i++) {
 		solver.SimulateUpToFrame(i);
 		meshes.push_back(std::move(solver.lastSimulatedMesh->convertToMesh(*ref)));
 	}
+
+	collisionRenderMesh = solver.collisionMesh ? solver.collisionMesh->convertToMesh(*ref) : nullptr;
+
 }
 
 void VBDManager::DrawUI() {
@@ -44,9 +52,10 @@ void VBDManager::DrawUI() {
 
 	ImGui::SeparatorText("Physics Material");
 
-	const array<string, 2> materialNames = {
+	const array<string, 3> materialNames = {
 		"Simple Spring",
-		"StVK Cloth"
+		"StVK Cloth",
+		"NeoHook"
 	};
 	if (ImGui::Button(("Physics Material: " + materialNames[currMaterialIndex]).c_str())) {
 		ImGui::OpenPopup("select_physics_material_popup");
@@ -77,6 +86,23 @@ void VBDManager::DrawUI() {
 
 		break;
 	}
+
+	ImGui::SeparatorText("Collision");
+	ImGui::SliderFloat("Collision Stiffness", &solver.kc, 1.0f, 1e7f, "%.1f");
+	ImGui::SliderFloat("Collision Threshold", &solver.collisionThreshold, 0.001f, 1.0f, "%.3f");
+	// Collision mesh
+	ImGui::SeparatorText("Collision Mesh");
+	ImGui::InputText("OBJ Path", collisionMeshPath, sizeof(collisionMeshPath));
+	ImGui::SameLine();
+	if (ImGui::Button("Load")) {
+		collisionMesh = mkU<HalfEdgeMesh>();
+		collisionMesh->LoadFromOBJ(collisionMeshPath);
+	}
+	ImGui::SeparatorText("Collision Offset");
+	ImGui::SliderFloat("Offset X", &solver.collisionOffset.x, -5.0f, 5.0f, "%.3f");
+	ImGui::SliderFloat("Offset Y", &solver.collisionOffset.y, -5.0f, 5.0f, "%.3f");
+	ImGui::SliderFloat("Offset Z", &solver.collisionOffset.z, -5.0f, 5.0f, "%.3f");
+	ImGui::Checkbox("Enable Collision Mesh", &solver.enableCollisionMesh);
 
 	ImGui::End();
 }

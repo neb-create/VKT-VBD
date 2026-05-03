@@ -12,10 +12,13 @@ public:
 	void DrawUI();
 
 	vector<uPtr<Mesh>> meshes;
+	uPtr<Mesh> collisionRenderMesh;
 private:
 	void Bake();
 
 	uPtr<HalfEdgeMesh> initialMesh;
+	uPtr<HalfEdgeMesh> collisionMesh;
+	char collisionMeshPath[256] = "models/diagCube.obj";
 	const VulkanReferences* ref;
 	VBDSolver solver;
 

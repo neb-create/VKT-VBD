@@ -40,6 +40,21 @@ HalfEdgeMesh::HalfEdgeMesh(const HalfEdgeMesh& other) {
 
 HalfEdgeMesh::HalfEdgeMesh() {}
 
+void HalfEdgeMesh::Translate(vec3 offset) {
+    for (auto& v : vertices) {
+        v->pos += offset;
+    }
+}
+void HalfEdgeMesh::Scale(vec3 scale) {
+    for (auto& v : vertices) {
+		vec3 pos = v->pos;
+		pos.x *= scale.x;
+		pos.y *= scale.y;
+        pos.z *= scale.z;
+		v->pos = pos;
+    }
+}
+
 uPtr<Mesh> HalfEdgeMesh::convertToMesh(const VulkanReferences& ref) {
     uPtr<Mesh> mesh = mkU<Mesh>();
     
@@ -190,11 +205,34 @@ void HalfEdgeMesh::LoadFromOBJ(const string& fileName) {
     f.close();
 }
 
+size_t VertexPairID(HVertex* a, HVertex* b) {
+    size_t lo = std::min(a->id, b->id);
+    size_t hi = std::max(a->id, b->id);
+    return lo * 2654435761ull ^ hi; // Knuth multiplicative hash
+}
+
+void HalfEdgeMesh::ComputeRestLengths() {
+    restLengths.clear();
+    for (const uPtr<HalfEdge>& h : halfEdges) {
+        HVertex* v0 = h->next->nextVertex;
+        HVertex* v1 = h->nextVertex;
+        int id = VertexPairID(v0, v1);
+        if (!restLengths.contains(id)) {
+            restLengths[id] = length(v0->pos - v1->pos);
+        }
+    }
+}
+
+float HalfEdgeMesh::GetRestLength(HVertex* a, HVertex* b) {
+    return restLengths.at(VertexPairID(a, b));
+}
+
 void HalfEdgeMesh::TriangulateAllFaces() {
     int initialFaceCount = faces.size();
     for (int i = 0; i < initialFaceCount; ++i) {
         TriangulateFace(faces[i].get());
     }
+	cout << "Triangulated all faces. Face count went from " << initialFaceCount << " to " << faces.size() << endl;
 }
 
 void HalfEdgeMesh::TriangulateFace(Face* face) {

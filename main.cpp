@@ -40,8 +40,8 @@ using namespace std;
 using namespace vk::raii;
 using namespace glm;
 
-constexpr uint32_t WIDTH = 2000;
-constexpr uint32_t HEIGHT = 1500;
+constexpr uint32_t WIDTH = 1800;
+constexpr uint32_t HEIGHT = 1200;
 const string MODEL_PATH = "models/viking_room.obj";
 const string TEXTURE_PATH = "textures/viking_room.png";
 
@@ -1072,10 +1072,17 @@ private:
         renderPass.EnqueueSetMaterial(skyboxMaterial, currFrameIndex);
         renderPass.EnqueueDraw(cubeMesh);
 
-        renderPass.EnqueueSetMaterial(vbdMaterial, currFrameIndex, { 1 });
-        int timeIndex = static_cast<int>(glm::floor(time*48)) % vbdManager.meshes.size();
-        std::cout << "Time Index: " << timeIndex << std::endl;
-        renderPass.EnqueueDraw(*vbdManager.meshes[timeIndex]);
+        if (!vbdManager.meshes.empty()) {
+            renderPass.EnqueueSetMaterial(vbdMaterial, currFrameIndex, { 1 });
+            int timeIndex = static_cast<int>(glm::floor(time * 48)) % vbdManager.meshes.size();
+            //std::cout << "Time Index: " << timeIndex << std::endl;
+            renderPass.EnqueueDraw(*vbdManager.meshes[timeIndex]);
+		}
+
+        if (vbdManager.collisionRenderMesh) {
+            renderPass.EnqueueSetMaterial(vbdMaterial, currFrameIndex, { 1 });
+            renderPass.EnqueueDraw(*vbdManager.collisionRenderMesh);
+        }
 #endif
 
         renderPass.FinishExecute(false, vk::ImageLayout::ePresentSrcKHR, &presentCompleteSemaphore, &renderFinishedSemaphore);

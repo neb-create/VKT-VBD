@@ -28,27 +28,40 @@
 VBDSolver::VBDSolver() : startPoseMesh(nullptr), lastSimulatedMesh(nullptr), lastSimulatedFrame(0), constrainedVerts(), currMaterial(SIMPLE_SPRING) {}
 
 bool IsConstrained(HVertex* vert) {
-	return abs(vert->pos.x) >= 0.97 && vert->pos.y > -0.01;//vert->pos.y > 0.75f;
+	return false; // abs(vert->pos.x) >= 0.97 && vert->pos.y > -0.01;//vert->pos.y > 0.75f;
 }
 
-void VBDSolver::ResetSimulation(uPtr<HalfEdgeMesh> newStartPoseMesh) {
+void VBDSolver::ResetSimulation(uPtr<HalfEdgeMesh> newStartPoseMesh, uPtr<HalfEdgeMesh> collisionMeshSource) {
 	if (newStartPoseMesh == nullptr && startPoseMesh == nullptr) {
 		std::cerr << "ERROR: ResetSimulation called without new start pose mesh when we don't have one!" << std::endl;
 		return;
 	}
 
+	if (currMaterial == 2) {
+		useTetMesh = true;
+	}
+	else {
+		useTetMesh = false;
+	}
+
 	if (newStartPoseMesh != nullptr) {
 		facesInfo.clear();
 		constrainedVerts.clear();
-
 		startPoseMesh = mkU<HalfEdgeMesh>(*newStartPoseMesh);
 		startPoseMesh->TriangulateAllFaces();
+		startPoseMesh->ComputeRestLengths();
 		ComputeFaceInfo();
-
 		for (const uPtr<HVertex>& v : startPoseMesh->vertices) {
 			if (IsConstrained(v.get()))
 				constrainedVerts.insert(v->id);
 		}
+	}
+
+	if (collisionMeshSource != nullptr) {
+		collisionMesh = mkU<HalfEdgeMesh>(*collisionMeshSource);
+		collisionMesh->TriangulateAllFaces();
+		collisionMesh->Translate(collisionOffset);
+		enableCollisionMesh = true;
 	}
 
 	lastSimulatedFrame = 0;
@@ -66,14 +79,69 @@ void VBDSolver::SimulateUpToFrame(uint frameIndex) {
 	}
 }
 
+void VBDSolver::ComputePlaneCollision(vec3 planeNormal, vec3 planePoint, HVertex* vert, vec3& collisionForce, mat3& collisionHessian) {
+	float d = fmax(0.0f, dot(planePoint - vert->pos, planeNormal));
+	if (d > 0.0f) {
+
+		// calculate force and hessian
+		vec3 floorCollisionForce = kc * d * planeNormal;
+		mat3 floorCollisionHessian = kc * glm::outerProduct(planeNormal, planeNormal);
+
+		// output
+		collisionForce += floorCollisionForce;
+		collisionHessian += floorCollisionHessian;
+
+	}
+}
+
+void VBDSolver::ComputeTriangleCollision(HVertex* vert, HVertex* a, HVertex* b, HVertex* c, vec3& collisionForce, mat3& collisionHessian) {
+	if (vert == a || vert == b || vert == c) return;
+
+	vec3 normal = normalize(cross(b->pos - a->pos, c->pos - a->pos));
+	float d = dot(vert->pos - a->pos, normal);
+
+	if (d > -collisionThreshold && d < 0.0f) {
+		vec3 proj = vert->pos - d * normal;
+
+		vec3 ab = b->pos - a->pos, ac = c->pos - a->pos, ap = proj - a->pos;
+		float d00 = dot(ab, ab), d01 = dot(ab, ac), d11 = dot(ac, ac);
+		float d20 = dot(ap, ab), d21 = dot(ap, ac);
+		float denom = d00 * d11 - d01 * d01;
+		float v = (d11 * d20 - d01 * d21) / denom;
+		float w = (d00 * d21 - d01 * d20) / denom;
+		float u = 1.0f - v - w;
+
+		if (u < 0.f || v < 0.f || w < 0.f) return;
+
+		collisionForce += kc * (-d) * normal;
+		collisionHessian += kc * outerProduct(normal, normal);
+	}
+}
+
 vec3 VBDSolver::PredictPosition(HVertex* vert, vec3 externalPos) {
 	if (constrainedVerts.count(vert->id) != 0) return vert->pos;
 
 	vec3 inertiaForce = -m / (dt * dt) * (vert->pos - externalPos);
-	mat3 inertiaHessian = m / (dt*dt) * glm::identity<mat3>();
+	mat3 inertiaHessian = m / (dt * dt) * glm::identity<mat3>();
 
 	vec3 neighborForce = vec3(0);
 	mat3 neighborHessian = mat3(0);
+
+	vec3 collisionForce = vec3(0);
+	mat3 collisionHessian = mat3(0);
+
+	ComputePlaneCollision(vec3(0, 1, 0), vec3(0, -3, 0), vert, collisionForce, collisionHessian);
+	
+	// collision against mesh triangles
+	if (enableCollisionMesh && collisionMesh != nullptr) {
+		for (const uPtr<Face>& f : collisionMesh->faces) {
+			// Rightnow: assuming mesh is triangle only
+			HVertex* a = f->edge->nextVertex;
+			HVertex* b = f->edge->next->nextVertex;
+			HVertex* c = f->edge->next->next->nextVertex;
+			ComputeTriangleCollision(vert, a, b, c, collisionForce, collisionHessian);
+		}
+	}
 
 	HalfEdge* currEdge = vert->incomingEdge;
 	do {
@@ -84,14 +152,25 @@ vec3 VBDSolver::PredictPosition(HVertex* vert, vec3 externalPos) {
 		vec3 dNormalized = normalize(d);
 		mat3 dNormalizedOuterProd = glm::outerProduct(dNormalized, dNormalized);
 
-		neighborForce += -k * (l - restLen) * dNormalized;
-		neighborHessian += k * (dNormalizedOuterProd + (1.0f / l) * (l - restLen) * (glm::identity<mat3>() - dNormalizedOuterProd));
+		float edgeRestLength = startPoseMesh->GetRestLength(vert, neighborVert) * restLen;
+
+		neighborForce += -k * (l - edgeRestLength) * dNormalized;
+		neighborHessian += k * (dNormalizedOuterProd + (1.0f / l) * (l - edgeRestLength) * (glm::identity<mat3>() - dNormalizedOuterProd));
 
 		currEdge = currEdge->next->sym;
 	} while (currEdge != vert->incomingEdge);
 
-	vec3 force = inertiaForce + neighborForce;
-	mat3 hessian = inertiaHessian + neighborHessian;
+	//inertiaForce = vec3(0);
+	//inertiaHessian = mat3(0);
+
+	//neighborForce = vec3(0);
+	//neighborHessian = mat3(0);
+
+	//collisionForce = vec3(0);
+	//collisionHessian = mat3(0);
+
+	vec3 force = inertiaForce + neighborForce + collisionForce;
+	mat3 hessian = inertiaHessian + neighborHessian + collisionHessian;
 
 	vec3 deltaX = glm::inverse(hessian) * force;
 	return vert->pos + deltaX;
@@ -273,29 +352,6 @@ void VBDSolver::SimulateOneFrame() {
 		externalPredictedPositions[i] = lastSimulatedMesh->vertices[i]->pos + lastSimulatedMesh->vertices[i]->vel * dt + externalAcc * dt * dt;
 	}
 
-#ifdef SCRATCH
-	// Scratch
-	uPtr<HalfEdgeMesh> scratchMesh = mkU<HalfEdgeMesh>(*lastSimulatedMesh);
-
-	// Gaussian Seidel Iterations
-	HalfEdgeMesh *currOldMesh, *currNewMesh;
-	for (int i = 0; i < iterCount; i++) {
-		currOldMesh = i % 2 == 0 ? lastSimulatedMesh.get() : scratchMesh.get();
-		currNewMesh = i % 2 == 0 ? scratchMesh.get() : lastSimulatedMesh.get();
-
-		for (int i = 0; i < scratchMesh->vertices.size(); i++) {
-			currNewMesh->vertices[i]->pos = PredictPosition(currOldMesh->vertices[i].get(), externalPredictedPositions[i]);
-		}
-	}
-
-	// Velocity update
-	for (int i = 0; i < currNewMesh->vertices.size(); i++) {
-		currNewMesh->vertices[i]->vel = (1.0f / dt) * (currNewMesh->vertices[i]->pos - oldPositions[i]);
-	}
-
-	// Copy back
-	lastSimulatedMesh = mkU<HalfEdgeMesh>(*currNewMesh); // no need to copy again
-#else
 	for (int i = 0; i < iterCount; i++) {
 		for (int i = 0; i < lastSimulatedMesh->vertices.size(); i++) {
 			HVertex* v = lastSimulatedMesh->vertices[i].get();
@@ -315,7 +371,8 @@ void VBDSolver::SimulateOneFrame() {
 	for (int i = 0; i < lastSimulatedMesh->vertices.size(); i++) {
 		HVertex* v = lastSimulatedMesh->vertices[i].get();
 		v->vel = (1.0f / dt) * (v->pos - oldPositions[i]);
-		v->pos = oldPositions[i] + 0.98f * v->vel * dt; // DAMPING
+		// v->pos = oldPositions[i] + 0.98f * v->vel * dt; // I dont think this is the right way to do DAMPING
+		v->vel *= 0.98f; // DAMPING
 	}
-#endif
+
 }
